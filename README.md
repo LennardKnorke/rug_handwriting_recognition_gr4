@@ -1,0 +1,1 @@
+# rug_handwriting_recognition_gr4
