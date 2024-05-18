@@ -19,4 +19,5 @@ def save_hyperparameters():
 # Main script to look for the best hyperparameters
 ##############################################
 if __name__ == '__main__':
+    print("Searching for the best hyperparameters for the CNN model")
     pass

@@ -19,4 +19,5 @@ def segm_temp():
 #
 ##############################################
 if __name__ == '__main__':
+    print("Running the segmentation script only")
     pass
