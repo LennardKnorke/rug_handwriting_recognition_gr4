@@ -1,5 +1,16 @@
 import os
 
+
+TEXT_HEIGHT : int = 1000      # The height of the full unsegmented text
+TEXT_WIDTH : int = 1000       # The width of the full unsegmented text
+
+CHARACTER_HEIGHT : int = 100  # The height of a single character
+CHARACTER_WIDTH : int = 100   # The width of a single character
+
+USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
+BINARY_THRESHOLD : int = 100   # The threshold to use when binarizing the images.
+
+
 def get_image_paths(folder_path : str, mode : bool = True) -> list:
     """
     This function reads all the images in a folder and returns them as a list.
