@@ -1,7 +1,7 @@
 import numpy as np
 
 ##############################################
-# CLASSES AND FUNCTIONS FOR THE SEGMENTATION SECTION
+# CLASSES AND FUNCTIONS FOR THE CLASSIFICATION SECTION
 ##############################################
 class CNN_Network:
     pass
