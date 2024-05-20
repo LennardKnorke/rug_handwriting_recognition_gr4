@@ -1,16 +1,7 @@
 import cv2
 import numpy as np
 
-def split_wide_contours(char_img, max_char_width):
-    # Simple horizontal split based on maximum character width
-    num_splits = int(char_img.shape[1] / max_char_width)
-    split_imgs = []
-    for i in range(num_splits):
-        start_x = i * max_char_width
-        end_x = start_x + max_char_width
-        split_img = char_img[:, start_x:end_x]
-        split_imgs.append(split_img)
-    return split_imgs
+
 
 def segment_Image(image_path):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -28,6 +19,10 @@ def segment_Image(image_path):
     # doesnt seem to work well
     # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     # img_dilated = cv2.dilate(img, kernel, iterations=1)
+
+    # check with erosion (maybe fixes the lines touching each other)
+
+
 
     # show morphed image for debugging
     # cv2.imshow('char', img_dilated)
@@ -49,14 +44,7 @@ def segment_Image(image_path):
             # cv2.imshow('char', char_img)
             # cv2.waitKey(0)
 
-            if w > max_char_width:
-                # If the contour is wider than the max width, split it
-                split_images = split_wide_contours(char_img, max_char_width)
-                char_images.extend(split_images)
-                # cv2.imshow('char', split_images[0])
-                # cv2.waitKey(0)
-            else:
-                char_images.append(char_img)
+            char_images.append(char_img)
             # Draw rectangle for visual debugging
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
