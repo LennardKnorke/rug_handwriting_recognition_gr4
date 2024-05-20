@@ -21,17 +21,18 @@ def segment_Image(image_path):
     # img_dilated = cv2.dilate(img, kernel, iterations=1)
 
     # check with erosion (maybe fixes the lines touching each other)
+    erosion_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (4, 4))  # Adjust kernel size as needed
+    img_eroded = cv2.erode(img, erosion_kernel, iterations=1)
 
 
 
-    # show morphed image for debugging
-    # cv2.imshow('char', img_dilated)
-    # cv2.waitKey(0)
+    # show eroded
+    cv2.imshow('char', img_eroded)
+    cv2.waitKey(0)
 
     # Find contours on the dilated image
-    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(img_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    max_char_width = 110
     char_images = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
@@ -57,7 +58,8 @@ def segment_Image(image_path):
 
 def main():
     path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
-    segment_Image(path)
+    char_images = segment_Image(path)
+    print("Number of characters found:", len(char_images))
 
 if __name__ == "__main__":
     main()
