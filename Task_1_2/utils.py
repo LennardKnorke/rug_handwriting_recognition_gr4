@@ -9,10 +9,10 @@ from sklearn.model_selection import train_test_split
 from joblib import dump
 
 
-TEXT_HEIGHT : int = 1000      # The height of the full unsegmented text
-TEXT_WIDTH : int = 1000       # The width of the full unsegmented text
+TEXT_HEIGHT : int = 1000      # The height of the full unsegmented text (Optional)
+TEXT_WIDTH : int = 1000       # The width of the full unsegmented text (Optional)
 
-CHARACTER_HEIGHT : int = 48  # The height of a single character
+CHARACTER_HEIGHT : int = 48  # The height of a single character for the
 CHARACTER_WIDTH : int = 38   # The width of a single character
 
 USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
@@ -35,13 +35,24 @@ def get_image_paths(folder_path : str) -> list:
     return image_paths
 
 def create_gif(image_list, gif_name, duration=0.1):
+    """
+    Create a gif from a list of images.
+    @param image_list: The list of images to use.
+    @param gif_name: The name of the gif file to save.
+    @param duration: The duration of each frame in the gif.
+    """
     frames = []
     for image in image_list:
         frames.append(image)
     imageio.mimsave(gif_name, frames, 'GIF', duration=duration)
     return
 
-def file_to_img(path):
+def file_to_img(path : str) -> np.ndarray:
+    """
+    Read an image file and return it resized as a numpy array.
+    @param path: The path to the image file.
+    @return The image as a numpy array.
+    """
     img = cv2.imread(path,-1)
     img = cv2.resize(img, (38, 48))
     return img

@@ -18,10 +18,14 @@ from classification import CNN_Network, save_hyperparameters
 
 
 if __name__ == '__main__':
-    print("This is the main script")
+    print("RUNNING TASK 1. THE DEAD SEA SCROLLS")
+    # Folder containing the testing image of the first task.
+    folder_path_part1 = "./Task_1_2/image-data/"    # CHANGE WHEN RUNNING WITH NEW IMAGES
 
 
-    image_folder = "./Task_1_2/"   # Folder containing the images of the dead sea scrolls. 
-                                        # CHANGE FOR TESTING
+
+    print("RUNNING TASK 2. THE IAM DATASET")
+    # Folder containing the images of the IAM dataset.
+    image_folder = "./Task_3/"                       # CHANGE WHEN RUNNING WITH NEW IMAGES
 
     pass
