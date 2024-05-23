@@ -1,7 +1,8 @@
 import os
 import cv2
 import numpy as np
-import imageio
+import torch.nn as nn
+import imageio.v3 as iio
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from sklearn.preprocessing import OneHotEncoder
@@ -17,6 +18,11 @@ CHARACTER_WIDTH : int = 38   # The width of a single character
 
 USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
 BINARY_THRESHOLD : int = 100   # The threshold to use when binarizing the images.
+
+N_EPOCHS : int = 50
+BATCH_SIZE : int = 64
+
+RECOGNIZER_LOSS_FUNCTION = nn.CrossEntropyLoss()
 
 
 def get_image_paths(folder_path : str) -> list:
@@ -44,7 +50,7 @@ def create_gif(image_list, gif_name, duration=0.1):
     frames = []
     for image in image_list:
         frames.append(image)
-    imageio.mimsave(gif_name, frames, 'GIF', duration=duration)
+    iio.imwrite(gif_name, frames, duration=duration, loop=0)
     return
 
 def file_to_img(path : str) -> np.ndarray:

@@ -1,8 +1,11 @@
 import numpy as np
-import utils
+from utils import *
 import cv2
-from torchinfo import summary
+import torch
+import torch.nn.functional as F
 # from molesq import ImageTransformer
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 ##############################################
 # CLASSES AND FUNCTIONS FOR THE AUGMENTATION SECTION
@@ -157,7 +160,7 @@ class WarpMLS:
 
         return dst
 
-def distort(src, n_patches, radius):
+def distort(src, n_patches, radius, movement):
     img_h, img_w = src.shape[:2]
 
     cut = img_w // n_patches
@@ -170,20 +173,23 @@ def distort(src, n_patches, radius):
     src_pts.append([img_w, img_h])
     src_pts.append([0, img_h])
 
-    dst_pts.append([np.random.randint(radius), np.random.randint(radius)])
-    dst_pts.append([img_w - np.random.randint(radius), np.random.randint(radius)])
-    dst_pts.append([img_w - np.random.randint(radius), img_h - np.random.randint(radius)])
-    dst_pts.append([np.random.randint(radius), img_h - np.random.randint(radius)])
+    dst_pts.append([np.random.randint(radius)*movement[0][0], np.random.randint(radius)*movement[0][1]])
+    dst_pts.append([img_w - np.random.randint(radius)*movement[1][0], np.random.randint(radius)*movement[1][1]])
+    dst_pts.append([img_w - np.random.randint(radius)*movement[2][0], img_h - np.random.randint(radius)*movement[2][1]])
+    dst_pts.append([np.random.randint(radius)*movement[3][0], img_h - np.random.randint(radius)*movement[3][1]])
 
-    half_radius = radius * 0.5
-
+    # half_radius = radius * 0.5
+    half_radius = radius
+    p_idx = 3
     for cut_idx in np.arange(1, n_patches, 1):
         src_pts.append([cut * cut_idx, 0])
         src_pts.append([cut * cut_idx, img_h])
-        dst_pts.append([cut * cut_idx + np.random.randint(radius) - half_radius,
-                        np.random.randint(radius) - half_radius])
-        dst_pts.append([cut * cut_idx + np.random.randint(radius) - half_radius,
-                        img_h + np.random.randint(radius) - half_radius])
+        p_idx += 1
+        dst_pts.append([cut * cut_idx + (np.random.randint(radius) - half_radius)*movement[p_idx][0],
+                        (np.random.randint(radius) - half_radius)*movement[p_idx][1]])
+        p_idx += 1
+        dst_pts.append([cut * cut_idx + (np.random.randint(radius) - half_radius)*movement[p_idx][0],
+                        img_h + (np.random.randint(radius) - half_radius)*movement[p_idx][1]])
 
     trans = WarpMLS(src, src_pts, dst_pts, img_w, img_h)
     dst = trans.generate()
@@ -192,27 +198,71 @@ def distort(src, n_patches, radius):
     return dst
     
 def demo(img_file, n_patches, radius):
-    n_patches = 1
-    radius = 10
-    h = 48
-    w = 38
-    
-    im = cv2.imread(img_file)
-    im = cv2.resize(im, (38, 48))
-    cv2.imshow("im_CV", im)
-
+    im = file_to_img(img_file)
+    # cv2.imshow("im_CV", im)
     distort_img_list = list()
-    for i in range(12):
-        distort_img = distort(im, n_patches, radius)
+    for i in range(100):
+        S = np.random.randint(2,size=2*(n_patches+1)*2).reshape((2*(n_patches+1), 2))
+        distort_img = distort(im, n_patches, radius, S)
         distort_img_list.append(distort_img)
-        cv2.imshow("distort_img", distort_img)
-        cv2.waitKey(100)
-    utils.create_gif(distort_img_list, r'img/distort.gif')
+        # cv2.imshow("distort_img", distort_img)
+        # cv2.waitKey(100)
+    create_gif(distort_img_list, r'img/distort.gif')
 
+def augment_batch(images, n_patches, radius, S):
+    images = torch.squeeze(images)
+    aug_images = torch.empty_like(images).detach().cpu()
+    images = images.detach().cpu().numpy()
+    S = S.detach().cpu().numpy()
+    for i in range(len(images)):
+        aug_images[i] = torch.from_numpy(distort(images[i], n_patches, radius, S[i]))
+    return aug_images
+
+def augment_data(images, agent, n_patches, radius):
+    images = images.to(device)
+    agent_outputs = agent(images)
+
+    S = torch.max(agent_outputs, 3).indices
+    S[S==0] = -1
+    S2 = S.detach().clone()
+    S2_probs = torch.max(F.softmax(agent_outputs, 3), 3).values
+    rev_points = np.random.randint(2, size=len(S))
+    S2[:][rev_points] = -1 * S2[:][rev_points]
+    S2_probs[:][rev_points] = 1 - S2_probs[:][rev_points]
+    
+    aug_S = augment_batch(images, n_patches, radius, S).reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
+    aug_S2 = augment_batch(images, n_patches, radius, S2).reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
+
+    return aug_S, aug_S2, S2_probs.detach()
+
+# def augment_loss(output, target):
+#     loss = torch.mean((output - target)**2)
+#     return loss
+
+def train(outputs, outputs_S2, labels, agent_opt, S2_probs):
+    loss = 0.0
+    for i in range(len(outputs)):
+        recognizer_loss_S = RECOGNIZER_LOSS_FUNCTION(outputs[i], labels[i])
+        recognizer_loss_S2 = RECOGNIZER_LOSS_FUNCTION(outputs_S2[i], labels[i])
+
+        if recognizer_loss_S <= recognizer_loss_S2:
+            S2_probs_i = torch.prod(S2_probs[i], 1)
+        else:
+            S2_probs_i = torch.prod(1 - S2_probs[i], 1)
+
+        loss += -1 * torch.sum(torch.log(S2_probs_i))
+
+    loss.requires_grad=True
+    agent_opt.zero_grad()
+    loss.backward()
+    # torch.nn.utils.clip_grad_value_(agent.parameters(), 100)
+    agent_opt.step()
 
 ##############################################
 #
 ##############################################
 if __name__ == '__main__':
     print("Running the augmentation script only")
+    demo("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm",
+         3, 20)
     pass

@@ -26,8 +26,7 @@ class AugmentAgentCNN(nn.Module):
     def forward(
         self, state: np.ndarray
     ):
-        # x = state.view(-1, 1, 48, 38)
-        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv1(state)))
         x = self.pool(F.relu(self.conv2(x)))
         x = F.relu(self.bn1(self.conv3(x)))
         x = self.pool(F.relu(self.conv4(x)))
@@ -56,7 +55,6 @@ class ClassifierCNN(nn.Module):
     def forward(
         self, state: np.ndarray
     ) :
-        # x = state.view(-1, 1, 48, 38)
         x = F.relu(self.conv1(state))
         x = F.relu(self.conv2(x))
         x = self.pool1(F.relu(self.conv3(x)))
