@@ -14,7 +14,7 @@ def find_lines(char_boxes):
 
         # Establish a horizontal line across the y-midpoint of the rightmost box
         y_mid = rightmost_box[1] + rightmost_box[3] // 2
-        line_min = y_mid - 88  # Extend 35 pixels up and down
+        line_min = y_mid - 88  # Extend 88 pixels up and down
         line_max = y_mid + 88
 
         # Check all remaining boxes to see if they intersect with this line
