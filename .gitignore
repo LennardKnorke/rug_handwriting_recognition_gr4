@@ -1,6 +1,7 @@
 *.pgm
 *.pyc
 *.jpg
+*png
 *gz
 *zip
 *pdf
