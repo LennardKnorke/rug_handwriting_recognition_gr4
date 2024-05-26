@@ -3,14 +3,19 @@
 Both folders contain scripts for the two handwriting recognition tasks. Both tasks require the data to be present in the folders.  <br />
 
 Folders and Files  <br />
-- ./DSS  containing data for the Dead Sea Scrolls
-- ./IAM    containing data for the IAM dataset
+- ./DSS         - containing data for the Dead Sea Scrolls
+    - augmentation.py       
+    - classification.py
+    - main.py               Runs the pipeline with data as specified by a path
+    - networks.py     
+    - segmentation.py  
+    - utils.py
+    - ./                    Folder containing images for training/preparing the pipeline
 
-- DSS.py    Main script to TEST the full DSS pipeline
-- IAM.py    Main script to TEST the full IAM pipeline
-  
-- augmentation.py    functions/classes to run the RL augmentation 
-- segmentation.py  
-- classification.py  
-- networks.py  
-- utils.py 
+- ./IAM         - containing data for the IAM dataset
+    - main.py               Runs the pipeline with data as specified by a path
+    - network.py            containing the XXXXX model class for the IAM taks
+    - training.py           Runs the training for the IAM dataset available
+    - ./                    Further Folders. E.g. for example with training data
+
+
