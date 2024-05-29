@@ -260,38 +260,43 @@ def distort_batch(images, n_patches, radius, S, radii_list=None):
     if new_radii_list: return aug_images, new_radii_list
     return aug_images
 
-def augment_data(images, agent, n_patches, radius):
+def augment_data(images, n_patches, radius, agent=None):
     """
     Augment images.
-    @param images: List
-    @param agent: List
-    @param n_patches: List
-    @param radius: List
+    @param images: Images to augment
+    @param n_patches: Number of patches
+    @param radius: Radius threshold
+    @param agent: Augmentation agent.
     @return Augmented/distorted images, randomly augmented images (used for learning the augmentation agent),
-            outputs of the agent, moving state of the distortion, moving state of the random distortion
+            outputs of the agent, moving state of the distortion, moving state of the random distortion.
+            If agent is not provided, returns only randomly augmented images
     """
     images = images.to(device)
-    agent_outputs = agent(images)
 
-    S = torch.max(agent_outputs, 3).indices
+    if agent is not None:
+        agent_outputs = agent(images)
+        S = torch.max(agent_outputs, 3).indices
 
-    # sample instead of taking max
-    # S_flat = agent_outputs.view(-1, 2)
-    # indices = torch.multinomial(S_flat, 1)
-    # S = indices.view(agent_outputs.size(0), agent_outputs.size(1), agent_outputs.size(3))
+        # sample instead of taking max
+        # S_flat = agent_outputs.view(-1, 2)
+        # indices = torch.multinomial(S_flat, 1)
+        # S = indices.view(agent_outputs.size(0), agent_outputs.size(1), agent_outputs.size(3))
 
-    S2 = S.detach().clone().cpu()
-    rev_points = np.random.randint(S.shape[1], size=S.shape[0])
-    rev_dirs = np.random.randint(2, size=S.shape[0])
-    mask = torch.zeros_like(S2, dtype=torch.bool)
-    mask[torch.arange(rev_points.shape[0]), rev_points, rev_dirs] = True
-    S2 = torch.where(mask, 1 - S2, S2)
-
+        S2 = S.detach().clone().cpu()
+        rev_points = np.random.randint(S.shape[1], size=S.shape[0])
+        rev_dirs = np.random.randint(2, size=S.shape[0])
+        mask = torch.zeros_like(S2, dtype=torch.bool)
+        mask[torch.arange(rev_points.shape[0]), rev_points, rev_dirs] = True
+        S2 = torch.where(mask, 1 - S2, S2)
+        aug_S, radii = distort_batch(images, n_patches, radius, S.clone())
+        aug_S2 = distort_batch(images, n_patches, radius, S2.clone(), radii_list=radii)
+        return aug_S, aug_S2, agent_outputs, S, S2
     
-    aug_S, radii = distort_batch(images, n_patches, radius, S.clone())
-    aug_S2 = distort_batch(images, n_patches, radius, S2.clone(), radii_list=radii)
-
-    return aug_S, aug_S2, agent_outputs, S, S2
+    else:
+        S = np.random.randint(2,size=images.shape[0]*2*(n_patches+1)*2).reshape((images.shape[0], 2*(n_patches+1), 2))
+        S = torch.from_numpy(S)
+        aug_S, _ = distort_batch(images, n_patches, radius, S)
+        return aug_S
 
 def learning_agent_loss(outputs, outputs_S2, labels, agent_outputs, S, S2):
     S = S.to(device)

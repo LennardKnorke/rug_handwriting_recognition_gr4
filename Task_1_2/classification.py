@@ -102,24 +102,22 @@ def save_model(name, model, opt, n_patches=None, radius=None):
     torch.save(model.state_dict(), uniquify(save_name+".pth"))
     torch.save(opt.state_dict(), uniquify(save_name+"_opt.pth"))
 
-def train_batch(images, labels, recognizer, recognizer_opt, aug_S2_batch, agent_outputs, S, S2, agent_opt, augment=True, train_recog=True):
+def train_batch(images, labels, recognizer, recognizer_opt, aug_S2_batch, agent_outputs, S, S2, agent_opt, train_agent=True, train_recog=True):
     """
     Train with a batch of images.
     @return Recognizer and augmentation agent loss (float)
     """
     outputs = recognizer(images)
+    recognizer_loss = RECOGNIZER_LOSS_FUNCTION(outputs, labels)
 
     if train_recog:
         recognizer_opt.zero_grad()
-        recognizer_loss = RECOGNIZER_LOSS_FUNCTION(outputs, labels)
         recognizer_loss.backward()
         torch.nn.utils.clip_grad_value_(recognizer.parameters(), 100)
         recognizer_opt.step()
-        rec_loss = recognizer_loss.item()
-    else:
-        rec_loss = 0.0
+    rec_loss = recognizer_loss.item()
 
-    if augment:
+    if train_agent:
         outputs_S2 = recognizer(aug_S2_batch)
         aug_loss = augmentation.train(outputs, outputs_S2, labels, agent_opt, agent_outputs, S, S2)
     else:
@@ -127,7 +125,7 @@ def train_batch(images, labels, recognizer, recognizer_opt, aug_S2_batch, agent_
 
     return rec_loss, aug_loss
 
-def train_epoch(images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=True, train_recog=True):
+def train_epoch(images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=True, train_agent=True, train_recog=True):
     """
     Train an episode.
     @param images: All (non-augmented) train images
@@ -145,6 +143,7 @@ def train_epoch(images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_
     @param n_patches: Number of patches used for augmentation
     @param radius: Radius of patches used for augmentation
     @param augment: Whether the augmentation agent should be trained and applied
+    @param train_agent: Whether the agent should be trained. Otherwise, random augmentation is used.
     @param train_recog: Whether the recognizer should be trained
     
     @return augmentation and recognizer losses, and accuracy for every batch
@@ -155,41 +154,47 @@ def train_epoch(images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_
 
     for images, labels in trainloader:
         if augment:
-            images, aug_S2, agent_outputs, S, S2 = augmentation.augment_data(images, agent, n_patches, radius)
-            aug_S2 = aug_S2.to(device)
-        else: aug_S2, agent_outputs, S, S2 = None, None, None, None
+            if train_agent:
+                images, aug_S2, agent_outputs, S, S2 = augmentation.augment_data(images, n_patches, radius, agent=agent)
+                aug_S2 = aug_S2.to(device)
+            else:
+                images = augmentation.augment_data(images, n_patches, radius)
+        if not train_agent: aug_S2, agent_outputs, S, S2 = None, None, None, None
 
         images, labels = images.to(device), labels.to(device)
-        batch_loss, batch_aug_loss = train_batch(images, labels, recognizer, recognizer_opt, aug_S2, agent_outputs, S, S2, agent_opt, augment=augment, train_recog=train_recog)
+        batch_loss, batch_aug_loss = train_batch(images, labels, recognizer, recognizer_opt, aug_S2, agent_outputs, S, S2, agent_opt, train_agent=train_agent, train_recog=train_recog)
 
         correct, total, _, _ = test_classifier(classes, recognizer, test_labels, testloader)
         batch_acc = correct / total
 
-        plot_interactive(batch_aug_loss, batch_loss, batch_acc, aug_loss_line, rec_loss_line, acc_line)
+        plot_interactive(batch_aug_loss, batch_loss, batch_acc, aug_loss_line, rec_loss_line, acc_line, train_agent=train_agent, train_recog=train_recog)
         batch_losses.append(batch_loss); batch_aug_losses.append(batch_aug_loss); batch_accs.append(batch_acc)
 
     return batch_losses, batch_aug_losses, batch_accs
 
-def init_interactive():
+def init_interactive(train_agent, train_recog):
     """
     Initialize interactive plots
     @return augmentation loss line, recognizer loss line, accuracy line
     """
     plt.ion()
-    plt.figure("aug", figsize=(5, 3))
-    aug_loss_line, = plt.plot([], [])
-    plt.figure("rec", figsize=(5, 3))
-    rec_loss_line, = plt.plot([], [])
-    plt.figure("acc", figsize=(5, 3))
-    acc_line, = plt.plot([], [])
+    if train_agent:
+        plt.figure("aug", figsize=(5, 3))
+        aug_loss_line, = plt.plot([], [])
+    if train_recog:
+        plt.figure("rec", figsize=(5, 3))
+        rec_loss_line, = plt.plot([], [])
+        plt.figure("acc", figsize=(5, 3))
+        acc_line, = plt.plot([], [])
     return aug_loss_line, rec_loss_line, acc_line
 
-def train(n_patches=None, radius=None, augment=True, train_recog=True):
+def train(n_patches=None, radius=None, augment=True, train_agent=False, train_recog=True):
     """
     Train augmentation agent and/or recognizer.
     @param n_patches: Number of patches used for augmentation.
     @param radius: Radius used for augmentation
     @param augment: Whether there should be augmentation
+    @param train_agent: Whether the augmentation agent should be trained (otherwise random augmentation)
     @param train_recog: Whether the recognizer should be trained (otherwise it is loaded)
     """
     org_images, labels = load_training_data()
@@ -205,8 +210,9 @@ def train(n_patches=None, radius=None, augment=True, train_recog=True):
         else: n_points = 2*(n_patches+1)
 
         agent = networks.AugmentAgentCNN(n_points).to(device)
-        agent_opt = optim.Adadelta(agent.parameters())
         # summary(agent, input_size=(1, 1, h, w), device=device)
+        if train_agent: agent_opt = optim.Adadelta(agent.parameters())
+        else: agent_opt = None
 
         augment_path = os.path.join("img", "augmented")
         os.makedirs(augment_path, exist_ok=True)
@@ -223,32 +229,36 @@ def train(n_patches=None, radius=None, augment=True, train_recog=True):
         classes, test_labels, testloader, recognizer = load_test_data(uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius), find=True))
     recognizer = recognizer.to(device)
 
-    aug_loss_line, rec_loss_line, acc_line = init_interactive()
+    aug_loss_line, rec_loss_line, acc_line = init_interactive(train_agent, train_recog)
     losses, aug_losses, accs = [], [], []
 
     for ep in range(N_EPOCHS):
         if augment:
-            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=True, train_recog=train_recog)
+            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=True, train_agent=train_agent, train_recog=train_recog)
 
-            # save example augmented images
-            ex_images = org_images[[0, 500, 1000]].to(device)
-            agent_outputs = agent(ex_images)
-            ex_images = torch.squeeze(ex_images, 1).detach().cpu().numpy()
-            S = torch.max(agent_outputs, 3).indices.detach().cpu().numpy()
-            for i in range(ex_images.shape[0]):
-                example_dist, src_pts, dst_pts = augmentation.distort(ex_images[i], n_patches, radius, S[i], return_points=True, max_radius=True)
-                example = augmentation.draw_augment_arrows(ex_images[i], src_pts, dst_pts, radius)
-                cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}.png"), example)
-                cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}_dist.png"), example_dist)
+            if train_agent:
+                # save example augmented images
+                ex_images = org_images[[0, 500, 1000]].to(device)
+                agent_outputs = agent(ex_images)
+                ex_images = torch.squeeze(ex_images, 1).detach().cpu().numpy()
+                S = torch.max(agent_outputs, 3).indices.detach().cpu().numpy()
+                for i in range(ex_images.shape[0]):
+                    example_dist, src_pts, dst_pts = augmentation.distort(ex_images[i], n_patches, radius, S[i], return_points=True, max_radius=True)
+                    example = augmentation.draw_augment_arrows(ex_images[i], src_pts, dst_pts, radius)
+                    cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}.png"), example)
+                    cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}_dist.png"), example_dist)
         else:
-            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=False, train_recog=True)
+            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, augment=False, train_agent=False, train_recog=True)
 
         losses.extend(batch_losses); aug_losses.extend(batch_aug_losses); accs.extend(batch_accs)
 
-    if train_recog: save_model('recognizer', recognizer, recognizer_opt, n_patches, radius)
-    if augment: save_model('agent', agent, agent_opt, n_patches, radius)
+    if train_recog:
+        save_model('recognizer', recognizer, recognizer_opt, n_patches, radius)
+        plot_final(losses, 'Classifier Loss'); plot_final(accs, 'Accuracy')
+    if train_agent:
+        save_model('agent', agent, agent_opt, n_patches, radius)
+        plot_final(aug_losses, 'Agent Loss')
     plt.ioff()
-    plot_final(losses, 'Loss'); plot_final(accs, 'Accuracy'); plot_final(aug_losses, 'Loss')
     plt.show()
 
 def load_and_test(model_name):
@@ -304,11 +314,10 @@ def main():
     
     if not os.path.exists("test_files.npy") or not os.path.exists("encoder.joblib"): prepare_train_test_data()
     
-    # n_patches, radius = 1, 10
-    n_patches, radius = None, None
+    n_patches, radius = 1, 10
+    # n_patches, radius = None, None
     recognizer_name = uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius), find=True)
-    # if not os.path.exists(recognizer_name + '.pth'):
-    train(n_patches=n_patches, radius=radius, augment=False, train_recog=True)
+    if not os.path.exists(recognizer_name + '.pth'): train(n_patches=n_patches, radius=radius, augment=True, train_agent=False, train_recog=True)
 
     load_and_test(recognizer_name)
 
