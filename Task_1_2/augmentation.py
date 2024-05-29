@@ -286,6 +286,7 @@ def augment_data(images, agent, n_patches, radius):
     mask = torch.zeros_like(S2, dtype=torch.bool)
     mask[torch.arange(rev_points.shape[0]), rev_points, rev_dirs] = True
     S2 = torch.where(mask, 1 - S2, S2)
+
     
     aug_S, radii = distort_batch(images, n_patches, radius, S.clone())
     aug_S2 = distort_batch(images, n_patches, radius, S2.clone(), radii_list=radii)

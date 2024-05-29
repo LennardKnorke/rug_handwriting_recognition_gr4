@@ -20,6 +20,7 @@ Example:
 
 import cv2
 import numpy as np
+from utils import *
 
 
 def find_lines(char_boxes, img_height):
@@ -129,37 +130,6 @@ def segment_Image(image_path):
     # cv2.destroyAllWindows()
 
     return lines
-
-def resize_and_pad(image, size=(38, 48)):
-    """
-    Resizes and pads an image to a specified size while maintaining the aspect ratio.
-
-    This function resizes the input image so that it fits within the specified size (38x48 by default),
-    while maintaining its aspect ratio. It then pads the resized image with black pixels to match the
-    specified size.
-
-    Parameters:
-    image (numpy.ndarray): The input image to be resized and padded.
-    size (tuple): The desired output size (width, height). Default is (38, 48).
-
-    Returns:
-    numpy.ndarray: The resized and padded image.
-    """
-    h, w = image.shape
-    scale = min(size[0] / w, size[1] / h)  # Calculate the scaling factor to maintain aspect ratio
-    new_w = int(w * scale)  # Calculate new width
-    new_h = int(h * scale)  # Calculate new height
-    resized_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)  # Resize the image
-
-    delta_w = size[0] - new_w  # Calculate padding width
-    delta_h = size[1] - new_h  # Calculate padding height
-    top, bottom = delta_h // 2, delta_h - (delta_h // 2)  # Distribute padding height evenly
-    left, right = delta_w // 2, delta_w - (delta_w // 2)  # Distribute padding width evenly
-
-    color = [255, 255, 255]  # Padding color (white
-    new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # Add padding
-
-    return new_image
 
 def extract_and_resize_characters(img_path):
     """

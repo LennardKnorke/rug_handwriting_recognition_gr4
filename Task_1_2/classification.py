@@ -245,8 +245,8 @@ def train(n_patches=None, radius=None, augment=True, train_recog=True):
 
         losses.extend(batch_losses); aug_losses.extend(batch_aug_losses); accs.extend(batch_accs)
 
-    save_model('recognizer', recognizer, recognizer_opt, n_patches, radius)
-    save_model('agent', agent, agent_opt, n_patches, radius)
+    if train_recog: save_model('recognizer', recognizer, recognizer_opt, n_patches, radius)
+    if augment: save_model('agent', agent, agent_opt, n_patches, radius)
     plt.ioff()
     plot_final(losses, 'Loss'); plot_final(accs, 'Accuracy'); plot_final(aug_losses, 'Loss')
     plt.show()
@@ -307,7 +307,8 @@ def main():
     # n_patches, radius = 1, 10
     n_patches, radius = None, None
     recognizer_name = uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius), find=True)
-    if not os.path.exists(recognizer_name + '.pth'): train(n_patches=n_patches, radius=radius, augment=False, train_recog=True)
+    # if not os.path.exists(recognizer_name + '.pth'):
+    train(n_patches=n_patches, radius=radius, augment=False, train_recog=True)
 
     load_and_test(recognizer_name)
 

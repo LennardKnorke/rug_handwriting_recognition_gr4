@@ -22,7 +22,7 @@ class AugmentAgentCNN(nn.Module):
         self.bn2 = nn.BatchNorm2d(64)
         self.conv6 = nn.Conv2d(64, 16, kernel_size=(3,3), stride=1, padding=1)
         self.bn3 = nn.BatchNorm2d(16)
-        self.fc1 = nn.Linear(96, 8*(self.n_patches+1))
+        self.fc1 = nn.Linear(192, 8*(self.n_patches+1))
 
     def forward(
         self, state: np.ndarray
@@ -33,7 +33,7 @@ class AugmentAgentCNN(nn.Module):
         x = self.pool(F.relu(self.conv4(x)))
         x = F.relu(self.bn2(self.conv5(x)))
         x = self.pool(F.relu(self.bn3(self.conv6(x))))
-        x = x.view(-1, 96)
+        x = x.view(-1, 192)
         x = self.fc1(x)
         x = x.view(-1, self.n_points, 2, 2)
         x = F.softmax(x,3)
