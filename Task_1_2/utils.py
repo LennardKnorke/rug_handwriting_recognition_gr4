@@ -142,18 +142,28 @@ def plot_interactive(
     acc: float,
     aug_loss_line: Line2D,
     rec_loss_line: Line2D,
-    acc_line: Line2D
+    acc_line: Line2D,
+    train_agent=True,
+    train_recog=True
 ):
     """
     Add new data to the interactive plots with augmentation loss, recognizer (classifier) loss, and accuracy.
     """
-    ep = len(aug_loss_line.get_ydata())
-    if ep == 0:
-        plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss')
-        plt.figure("rec"); plt.xlabel('Batch'); plt.ylabel('Classifier Loss')
-        plt.figure("acc"); plt.xlabel('Batch'); plt.ylabel('Accuracy'); plt.gca().set_ylim([0, 1])
-        
+    if train_agent: ep = len(aug_loss_line.get_ydata())
+    else: ep = len(rec_loss_line.get_ydata())
+    
+    to_update = []
+    if train_agent:
+        to_update = ["aug"]
+        if ep == 0: plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss')
+    if train_recog:
+        to_update.extend(["rec", "acc"])
+        if ep == 0:
+            plt.figure("rec"); plt.xlabel('Batch'); plt.ylabel('Classifier Loss')
+            plt.figure("acc"); plt.xlabel('Batch'); plt.ylabel('Accuracy'); plt.gca().set_ylim([0, 1])
+
     for i, x in enumerate(["aug", "rec", "acc"]):
+        if x not in to_update: continue
         plt.figure(x)
         line = [aug_loss_line, rec_loss_line, acc_line][i]
 

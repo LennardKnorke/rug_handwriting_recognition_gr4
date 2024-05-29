@@ -178,6 +178,7 @@ def init_interactive(train_agent, train_recog):
     @return augmentation loss line, recognizer loss line, accuracy line
     """
     plt.ion()
+    aug_loss_line, rec_loss_line, acc_line = None, None, None
     if train_agent:
         plt.figure("aug", figsize=(5, 3))
         aug_loss_line, = plt.plot([], [])
@@ -229,6 +230,7 @@ def train(n_patches=None, radius=None, augment=True, train_agent=False, train_re
         classes, test_labels, testloader, recognizer = load_test_data(uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius), find=True))
     recognizer = recognizer.to(device)
 
+    
     aug_loss_line, rec_loss_line, acc_line = init_interactive(train_agent, train_recog)
     losses, aug_losses, accs = [], [], []
 
@@ -314,7 +316,7 @@ def main():
     
     if not os.path.exists("test_files.npy") or not os.path.exists("encoder.joblib"): prepare_train_test_data()
     
-    n_patches, radius = 1, 10
+    n_patches, radius = 1, 5
     # n_patches, radius = None, None
     recognizer_name = uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius), find=True)
     if not os.path.exists(recognizer_name + '.pth'): train(n_patches=n_patches, radius=radius, augment=True, train_agent=False, train_recog=True)
