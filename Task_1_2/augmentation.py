@@ -6,11 +6,16 @@ import torch.nn.functional as F
 # from molesq import ImageTransformer
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# torch.autograd.set_detect_anomaly(True)
 
 ##############################################
 # CLASSES AND FUNCTIONS FOR THE AUGMENTATION SECTION
 ##############################################
 class WarpMLS:
+    """
+    Moving Least Squares transformation on an image, given some number of source points and distance points.
+    Taken from https://github.com/RubanSeven/Text-Image-Augmentation-python/blob/master/warp_mls.py
+    """
     def __init__(self, src, src_pts, dst_pts, dst_w, dst_h, trans_ratio=1.):
         self.src = src
         self.src_pts = src_pts
@@ -160,10 +165,33 @@ class WarpMLS:
 
         return dst
 
-def distort(src, n_patches, radius, movement):
+
+def sample_radius(radius, max_radius=False):
+    """
+    Sample a random radius within a limit (radius), or return max_radius when given.
+    """
+    if max_radius: return radius
+    else: return np.random.randint(radius)
+    
+def distort(src, n_patches, radius, movement, vertical=True, return_points=False, max_radius=False, radii=None):
+    """
+    Initialize source points on an image according to the number of patches, move these points to distance points
+    according to the maximum radius and moving state, and augment image with MLS. If max radius is given, the
+    movements will always use the radius threshold. If a list of radii is given, these will be used. If return_points
+    is true, the source and destination points will be returned besides the distored image, and otherwise the sampled
+    radii. Adapted from https://github.com/RubanSeven/Text-Image-Augmentation-python/blob/master/warp_mls.py
+    """
+    movement[movement==0] = -1
+    if radii is None:
+        radii = []
+        for _ in range(2*(n_patches+1)*2):
+            radii.append(sample_radius(radius, max_radius))
+    radii_copy = radii.copy()
+    # if movement[0][0] == -1 and movement[0][1] == -1: radii[:] = [100 for _ in radii]
     img_h, img_w = src.shape[:2]
 
-    cut = img_w // n_patches
+    if vertical: cut = img_h // n_patches
+    else: cut = img_w // n_patches
 
     src_pts = list()
     dst_pts = list()
@@ -172,91 +200,184 @@ def distort(src, n_patches, radius, movement):
     src_pts.append([img_w, 0])
     src_pts.append([img_w, img_h])
     src_pts.append([0, img_h])
+    if n_patches == 4:
+        src_pts.append([img_w//2, img_h//2])
 
-    dst_pts.append([np.random.randint(radius)*movement[0][0], np.random.randint(radius)*movement[0][1]])
-    dst_pts.append([img_w - np.random.randint(radius)*movement[1][0], np.random.randint(radius)*movement[1][1]])
-    dst_pts.append([img_w - np.random.randint(radius)*movement[2][0], img_h - np.random.randint(radius)*movement[2][1]])
-    dst_pts.append([np.random.randint(radius)*movement[3][0], img_h - np.random.randint(radius)*movement[3][1]])
+    dst_pts.append([radii.pop()*movement[0][0], radii.pop()*movement[0][1]])
+    dst_pts.append([img_w + radii.pop()*movement[1][0], radii.pop()*movement[1][1]])
+    dst_pts.append([img_w + radii.pop()*movement[2][0], img_h + radii.pop()*movement[2][1]])
+    dst_pts.append([radii.pop()*movement[3][0], img_h + radii.pop()*movement[3][1]])
+    if n_patches == 4:
+        dst_pts.append([img_w//2 + radii.pop()*movement[4][0], img_h//2 + radii.pop()*movement[3][1]])
+    else:
+        # half_radius = radius * 0.5
+        half_radius = 0
+        p_idx = 3
+        for cut_idx in np.arange(1, n_patches, 1):
+            if vertical:
+                src_pts.append([0, cut * cut_idx])
+                src_pts.append([img_w, cut * cut_idx])
+            else:
+                src_pts.append([cut * cut_idx, 0])
+                src_pts.append([cut * cut_idx, img_h])
 
-    # half_radius = radius * 0.5
-    half_radius = radius
-    p_idx = 3
-    for cut_idx in np.arange(1, n_patches, 1):
-        src_pts.append([cut * cut_idx, 0])
-        src_pts.append([cut * cut_idx, img_h])
-        p_idx += 1
-        dst_pts.append([cut * cut_idx + (np.random.randint(radius) - half_radius)*movement[p_idx][0],
-                        (np.random.randint(radius) - half_radius)*movement[p_idx][1]])
-        p_idx += 1
-        dst_pts.append([cut * cut_idx + (np.random.randint(radius) - half_radius)*movement[p_idx][0],
-                        img_h + (np.random.randint(radius) - half_radius)*movement[p_idx][1]])
+            p_idx += 1
+            if vertical: dst_pts.append([(radii.pop() - half_radius)*movement[p_idx][0],
+                            cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][1]])
+            else: dst_pts.append([cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][0],
+                            (radii.pop() - half_radius)*movement[p_idx][1]])
+            p_idx += 1
+            if vertical: dst_pts.append([img_w + (radii.pop() - half_radius)*movement[p_idx][0],
+                            cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][1]])
+            else: dst_pts.append([cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][0],
+                            img_h + (radii.pop() - half_radius)*movement[p_idx][1]])
 
     trans = WarpMLS(src, src_pts, dst_pts, img_w, img_h)
     dst = trans.generate()
     # trans = ImageTransformer(src, np.array(src_pts), np.array(dst_pts), color_dim=2, interp_order=2)
     # dst = trans.deform_viewport()
-    return dst
-    
-def demo(img_file, n_patches, radius):
-    im = file_to_img(img_file)
-    # cv2.imshow("im_CV", im)
-    distort_img_list = list()
-    for i in range(100):
-        S = np.random.randint(2,size=2*(n_patches+1)*2).reshape((2*(n_patches+1), 2))
-        distort_img = distort(im, n_patches, radius, S)
-        distort_img_list.append(distort_img)
-        # cv2.imshow("distort_img", distort_img)
-        # cv2.waitKey(100)
-    create_gif(distort_img_list, r'img/distort.gif')
+    if return_points: return dst, src_pts, dst_pts
+    return dst, radii_copy
 
-def augment_batch(images, n_patches, radius, S):
-    images = torch.squeeze(images)
+def distort_batch(images, n_patches, radius, S, radii_list=None):
+    """
+    Disort a batch of images with elastic morphing based on the moving state array S.
+    """
+    images = torch.squeeze(images, 1)
     aug_images = torch.empty_like(images).detach().cpu()
     images = images.detach().cpu().numpy()
-    S = S.detach().cpu().numpy()
+    S_cpu = S.detach().cpu().numpy()
+    new_radii_list = []
     for i in range(len(images)):
-        aug_images[i] = torch.from_numpy(distort(images[i], n_patches, radius, S[i]))
+        if radii_list is None:
+            distort_img, new_radii = distort(images[i], n_patches, radius, S_cpu[i])
+            new_radii_list.append(new_radii)
+        else:
+            distort_img, _ = distort(images[i], n_patches, radius, S_cpu[i], radii=radii_list[i])
+        aug_images[i] = torch.from_numpy(distort_img)
+
+    aug_images = aug_images.reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
+    if new_radii_list: return aug_images, new_radii_list
     return aug_images
 
 def augment_data(images, agent, n_patches, radius):
+    """
+    Augment images.
+    @param images: List
+    @param agent: List
+    @param n_patches: List
+    @param radius: List
+    @return Augmented/distorted images, randomly augmented images (used for learning the augmentation agent),
+            outputs of the agent, moving state of the distortion, moving state of the random distortion
+    """
     images = images.to(device)
     agent_outputs = agent(images)
 
     S = torch.max(agent_outputs, 3).indices
-    S[S==0] = -1
-    S2 = S.detach().clone()
-    S2_probs = torch.max(F.softmax(agent_outputs, 3), 3).values
-    rev_points = np.random.randint(2, size=len(S))
-    S2[:][rev_points] = -1 * S2[:][rev_points]
-    S2_probs[:][rev_points] = 1 - S2_probs[:][rev_points]
+
+    # sample instead of taking max
+    # S_flat = agent_outputs.view(-1, 2)
+    # indices = torch.multinomial(S_flat, 1)
+    # S = indices.view(agent_outputs.size(0), agent_outputs.size(1), agent_outputs.size(3))
+
+    S2 = S.detach().clone().cpu()
+    rev_points = np.random.randint(S.shape[1], size=S.shape[0])
+    rev_dirs = np.random.randint(2, size=S.shape[0])
+    mask = torch.zeros_like(S2, dtype=torch.bool)
+    mask[torch.arange(rev_points.shape[0]), rev_points, rev_dirs] = True
+    S2 = torch.where(mask, 1 - S2, S2)
     
-    aug_S = augment_batch(images, n_patches, radius, S).reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
-    aug_S2 = augment_batch(images, n_patches, radius, S2).reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
+    aug_S, radii = distort_batch(images, n_patches, radius, S.clone())
+    aug_S2 = distort_batch(images, n_patches, radius, S2.clone(), radii_list=radii)
 
-    return aug_S, aug_S2, S2_probs.detach()
+    return aug_S, aug_S2, agent_outputs, S, S2
 
-# def augment_loss(output, target):
-#     loss = torch.mean((output - target)**2)
-#     return loss
+def learning_agent_loss(outputs, outputs_S2, labels, agent_outputs, S, S2):
+    S = S.to(device)
+    S2 = S2.to(device)
 
-def train(outputs, outputs_S2, labels, agent_opt, S2_probs):
-    loss = 0.0
-    for i in range(len(outputs)):
-        recognizer_loss_S = RECOGNIZER_LOSS_FUNCTION(outputs[i], labels[i])
-        recognizer_loss_S2 = RECOGNIZER_LOSS_FUNCTION(outputs_S2[i], labels[i])
+    # use "edit distance" 1 or 0
+    # recognizer_loss_S = torch.max(outputs, 1).indices != torch.max(labels, 1).indices
+    # recognizer_loss_S = recognizer_loss_S.int()
+    # recognizer_loss_S2 = torch.max(outputs_S2, 1).indices != torch.max(labels, 1).indices
+    # recognizer_loss_S2 = recognizer_loss_S2.int()
 
-        if recognizer_loss_S <= recognizer_loss_S2:
-            S2_probs_i = torch.prod(S2_probs[i], 1)
-        else:
-            S2_probs_i = torch.prod(1 - S2_probs[i], 1)
+    # use recognizer loss
+    recognizer_loss_S = F.cross_entropy(outputs, labels, reduction='none')
+    recognizer_loss_S2 = F.cross_entropy(outputs_S2, labels, reduction='none')
 
-        loss += -1 * torch.sum(torch.log(S2_probs_i))
+    # true = S2.unsqueeze(-1).expand(-1,-1,-1,2)
+    # mask2 = torch.arange(2).expand_as(true)
+    # true = torch.where(true==mask2, 1, 0)
+    # true = true.view(agent_outputs.size(0),-1)
+ 
+    # mask = recognizer_loss_S <= recognizer_loss_S2
+    # mask = mask.unsqueeze(-1).unsqueeze(-1).expand_as(S2)
+    # mask = mask & torch.max(agent_outputs,3).indices != S2
+    # S2 = torch.where(mask, 1 - S2, S2)
+    # S2 = S2.view(-1)
+    # agent_outputs = agent_outputs.view(-1, 2)
+    # loss = F.nll_loss(torch.log(agent_outputs + 1e-20), S2)
+ 
+    # print(agent_outputs[0][0].tolist())
+    # if (S[0][0][0] != 0 or S[0][0][1] != 0) and S2[0][0][0] == 0 and S2[0][0][1] == 0:
+    #     print(S[0][0].tolist(), S2[0][0].tolist())
+    #     print("S", round(float(recognizer_loss_S.float().mean()), 3))
+    #     print("S2", round(float(recognizer_loss_S2.float().mean()), 3))
+    rev_mask = S != S2
+    rev = rev_mask.any(-1).max(-1).indices
+    S_rev = S[torch.arange(rev.size(0)), rev]
+    S2_rev = S2[torch.arange(rev.size(0)), rev]
+    agent_outputs = agent_outputs[torch.arange(rev.size(0)), rev]
+    mask = recognizer_loss_S <= recognizer_loss_S2
+    mask = mask.unsqueeze(-1).expand_as(S2_rev)
+    true = torch.where(mask, S2_rev, S_rev)
+    true = true.view(-1)
+    agent_outputs = agent_outputs.view(-1, 2)
+    loss = F.nll_loss(torch.log(agent_outputs + 1e-20), true)
+    return loss
 
-    loss.requires_grad=True
-    agent_opt.zero_grad()
-    loss.backward()
-    # torch.nn.utils.clip_grad_value_(agent.parameters(), 100)
-    agent_opt.step()
+def train(outputs, outputs_S2, labels, agent_opt, agent_outputs, S, S2):
+    """
+    Train the learning augmentation agent.
+    @param outputs: Outputs of the recognizer on the augmented images
+    @param outputs_S2: Outputs of the recognizer on the randomly augmented images
+    @param labels: True image classes
+    @param agent_opt: Agent optimizer
+    @param agent_outputs: Agent outputs from this epoch
+    @param S: Distortion moving state
+    @param S2: Random distortion moving state
+    @return Learning agent loss.
+    """
+    criterion = learning_agent_loss
+    loss = criterion(outputs, outputs_S2, labels, agent_outputs, S, S2)
+    if not torch.isnan(loss):
+        agent_opt.zero_grad()
+        loss.backward()
+        agent_opt.step()
+        return loss.item()
+    return 0.0
+
+def draw_augment_arrows(img, src_pts, dst_pts, radius):
+    """
+    Preview distortion with arrows from source points to destination points, displayed using the maximum radius.
+    """
+    img = cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
+    img = cv2.copyMakeBorder(img, radius, radius, radius, radius, cv2.BORDER_CONSTANT)
+    for j in range(len(src_pts)):
+        img = cv2.arrowedLine(img, (src_pts[j][0]+radius,src_pts[j][1]+radius), (dst_pts[j][0]+radius,dst_pts[j][1]+radius), color=(0, 0, 255), thickness=4)
+    return img
+    
+def demo(img_file, n_patches, radius):
+    im = file_to_img(img_file)
+    distort_img_list = list()
+    for _ in range(100):
+        if n_patches == 4: S = np.random.randint(2,size=5*2).reshape((5, 2))
+        else: S = np.random.randint(2,size=2*(n_patches+1)*2).reshape((2*(n_patches+1), 2))
+        distort_img, src_pts, dst_pts = distort(im, n_patches, radius, S, return_points=True)
+        distort_img = draw_augment_arrows(distort_img, src_pts, dst_pts, radius)
+        distort_img_list.append(distort_img)
+    create_gif(distort_img_list, r'img/distort.gif')
 
 ##############################################
 #
@@ -264,5 +385,5 @@ def train(outputs, outputs_S2, labels, agent_opt, S2_probs):
 if __name__ == '__main__':
     print("Running the augmentation script only")
     demo("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm",
-         3, 20)
+         2, 10)
     pass
