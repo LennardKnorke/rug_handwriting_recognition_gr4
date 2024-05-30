@@ -20,7 +20,7 @@ CHARACTER_WIDTH : int = 50   # The width of a single character for Dead sea scro
 USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
 BINARY_THRESHOLD : int = 100   # The threshold to use when binarizing the images.
 
-N_EPOCHS : int = 20
+N_EPOCHS : int = 25
 BATCH_SIZE : int = 64
 
 RECOGNIZER_LOSS_FUNCTION = nn.CrossEntropyLoss()
@@ -155,22 +155,23 @@ def plot_interactive(
     to_update = []
     if train_agent:
         to_update = ["aug"]
-        if ep == 0: plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss')
+        if ep == 0: plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss'); plt.gca().yaxis.tick_right()
     if train_recog:
         to_update.extend(["rec", "acc"])
         if ep == 0:
-            plt.figure("rec"); plt.xlabel('Batch'); plt.ylabel('Classifier Loss')
-            plt.figure("acc"); plt.xlabel('Batch'); plt.ylabel('Accuracy'); plt.gca().set_ylim([0, 1])
+            plt.figure("rec"); plt.xlabel('Batch'); plt.ylabel('Classifier Loss'); plt.gca().yaxis.tick_right()
+            plt.figure("acc"); plt.xlabel('Batch'); plt.ylabel('Accuracy'); plt.gca().yaxis.tick_right()
 
     for i, x in enumerate(["aug", "rec", "acc"]):
         if x not in to_update: continue
         plt.figure(x)
+        ax = plt.gca()
         line = [aug_loss_line, rec_loss_line, acc_line][i]
 
-        if x != "acc":
-            losses = line.get_ydata()
-            if x == "rec": plt.gca().set_ylim([0, sum(losses[-20:])/2])
-            if x == "aug": plt.gca().set_ylim([0, sum(losses[-20:])/10])
+        data = line.get_ydata()
+        if x == "aug": ax.set_ylim([0, sum(data[-20:])/10])
+        if x == "rec": ax.set_ylim([0, sum(data[-20:])/10])
+        if x == "acc": ax.set_ylim([1 - (1 - (sum(data[-20:])/20))*2, 1])
 
         plt.axvline(ep, alpha=0.0)
         line.set_xdata(np.append(line.get_xdata(), ep))
@@ -208,3 +209,23 @@ def resize_and_pad(image, size=(CHARACTER_WIDTH, CHARACTER_HEIGHT)):
     new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # Add padding
 
     return new_image
+
+def uniquify(path, find=False):
+    """
+    Adapt the filename so that it doesn't overwrite.
+    @param path: Path to possible modify.
+    @param find: Instead of modifying path, find the name of the latest version.
+    @return (Possibly) modified pathname such as 'file.ext' 'file (1).ext' or 'file (2).ext'
+            If find is True, then it returns the name of the latest version.
+    """
+    filename, extension = os.path.splitext(path)
+    counter = 1
+
+    while os.path.exists(path):
+        path = filename + " (" + str(counter) + ")" + extension
+        counter += 1
+
+    if find:
+        if counter == 2: return filename + extension
+        elif counter > 2: return filename + " (" + str(counter-2) + ")" + extension
+    return path
