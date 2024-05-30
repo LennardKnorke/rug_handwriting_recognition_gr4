@@ -7,7 +7,7 @@ class BiLoss(nn.Module):
         self.reg_coeff = reg_coeff
         self.ce_loss = nn.CrossEntropyLoss()
         self.binary_ce_loss = nn.BCELoss()
-        self.kl_loss = nn.KLDivLoss(reduction='batchmean')
+        self.kl_loss = nn.MSELoss()
 
     def forward(self,  prediction, target, end, dist):
         cls, end_pred = prediction
