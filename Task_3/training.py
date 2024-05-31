@@ -72,12 +72,24 @@ class IAM_Dataset(Dataset):
             # Update Max Length
             if len(label) > self.n_chars:
                 self.n_chars = len(label)
+
+        self.char_index = dict(zip(self.chars, range(len(self.chars))))
         
         print("Number of images: ", len(self.images_files))
         print("Max length of target string: ", self.n_chars)
         print("Number of unique characters: ", len(self.chars))
         print("Characters: ", self.chars)
         return
+
+    def strings_onehot(self, string: str) -> torch.Tensor:
+        targets = torch.zeros((
+            self.n_chars,
+            len(self.chars),
+        ))
+
+        for ch_idx, char in enumerate(string):
+            targets[ch_idx, self.char_index[char]] = 1.0
+        return targets
 
     def __len__(self):
         return len(self.images_files)
@@ -87,8 +99,8 @@ class IAM_Dataset(Dataset):
         img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
         img = img / 255.0
         img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
-        
-        return img, self.labels[idx]
+
+        return img, self.strings_onehot(self.labels[idx])
     
 def strings_to_targets(strings : Tuple[str]) -> torch.Tensor:
     """
@@ -97,7 +109,7 @@ def strings_to_targets(strings : Tuple[str]) -> torch.Tensor:
     @return: tensor with the targets
     """
     # Create a list of lists with each character as a target
-    targets  = [[char for char in full_string] for full_string in strings]
+    targets = [[char for char in full_string] for full_string in strings]
     # Flatten
     targets_flat = [char for sublist in targets for char in sublist]
     encoder = preprocessing.LabelEncoder()
@@ -108,6 +120,7 @@ def strings_to_targets(strings : Tuple[str]) -> torch.Tensor:
     print(np.unique(targets_enc))
     print(targets_enc)
     return targets_enc
+
 
 def train_model(model : nn.Module, 
                 training_data : Dataset,
@@ -137,7 +150,8 @@ def train_model(model : nn.Module,
 
         # Training Loop
         for images, full_label_strings in training_loader:
-            targets = strings_to_targets(full_label_strings)
+            #targets = strings_to_targets(full_label_strings)
+            targets = full_label_strings
             optimizer.zero_grad()
             model.train()
 
