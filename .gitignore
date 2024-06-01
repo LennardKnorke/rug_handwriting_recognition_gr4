@@ -8,3 +8,5 @@
 *.gif
 iam_lines_gt.txt
 *.pth
+*.pbm
+*.docx

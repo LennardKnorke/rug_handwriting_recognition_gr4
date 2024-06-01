@@ -20,7 +20,6 @@ CHARACTER_WIDTH : int = 50   # The width of a single character for Dead sea scro
 USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
 BINARY_THRESHOLD : int = 100   # The threshold to use when binarizing the images.
 
-N_EPOCHS : int = 25
 BATCH_SIZE : int = 64
 
 RECOGNIZER_LOSS_FUNCTION = nn.CrossEntropyLoss()
@@ -123,18 +122,28 @@ def load_segmented_data(test_files=None, test=False):
             
     return imgs, labels, img_files
 
-def prepare_train_test_data():
+
+def create_test_split(split):
     """
     Create and save a train-test split of the pre-segmented images in the Dead sea scrolls dataset.
-    Only the names of the test images and the encoder have to be saved.
+    Only the names of the test images have to be saved.
     """
-    _, y, f = load_segmented_data()
-    _, f_test, _, _ = train_test_split(f, y, test_size=0.1, stratify=y, random_state=42)
-    np.save("test_files.npy", f_test)
-    
+    _, labels, filenames = load_segmented_data()
+    _, filenames_test, _, _ = train_test_split(filenames, labels, test_size=split/100, stratify=labels, random_state=42)
+    np.save(get_test_split_filename(split), filenames_test)
+    if not os.path.exists("encoder.joblib"): create_encoder()
+
+def create_encoder():
+    """
+    Create and save an encoder.
+    """
+    _, labels, _ = load_segmented_data()
     encoder = OneHotEncoder(sparse_output=False)
-    y = encoder.fit(y[:, np.newaxis])
+    labels = encoder.fit(labels[:, np.newaxis])
     dump(encoder, "encoder.joblib")
+
+def get_test_split_filename(split):
+    return f"test_split_{split}.npy"
 
 def plot_interactive(
     aug_loss: float,
@@ -143,17 +152,17 @@ def plot_interactive(
     aug_loss_line: Line2D,
     rec_loss_line: Line2D,
     acc_line: Line2D,
-    train_agent=True,
+    lta=True,
     train_recog=True
 ):
     """
     Add new data to the interactive plots with augmentation loss, recognizer (classifier) loss, and accuracy.
     """
-    if train_agent: ep = len(aug_loss_line.get_ydata())
+    if lta: ep = len(aug_loss_line.get_ydata())
     else: ep = len(rec_loss_line.get_ydata())
     
     to_update = []
-    if train_agent:
+    if lta:
         to_update = ["aug"]
         if ep == 0: plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss'); plt.gca().yaxis.tick_right()
     if train_recog:
@@ -229,3 +238,35 @@ def uniquify(path, find=False):
         if counter == 2: return filename + extension
         elif counter > 2: return filename + " (" + str(counter-2) + ")" + extension
     return path
+
+def hebrewize(roman):
+    d = {
+         'Alef': 'א',
+         'Ayin': 'ע',
+         'Bet': 'ב',
+         'Dalet': 'ד',
+         'Gimel': 'ג',
+         'He': 'ה',
+         'Het': 'ח',
+         'Kaf': 'כ',
+         'Kaf-final': 'ך',
+         'Lamed': 'ל',
+         'Mem': 'ם',
+         'Mem-medial': 'מ',
+         'Nun-final': 'ן',
+         'Nun-medial': 'נ',
+         'Pe': 'פ',
+         'Pe-final': 'ף',
+         'Qof': 'ק',
+         'Resh': 'ר',
+         'Samekh': 'ס',
+         'Shin': 'ש',
+         'Taw': 'ת',
+         'Tet': 'ט',
+         'Tsadi-final': 'ץ',
+         'Tsadi-medial': 'צ',
+         'Waw': 'ו',
+         'Yod': 'י',
+         'Zayin': 'ז'
+    }
+    return d[roman]
