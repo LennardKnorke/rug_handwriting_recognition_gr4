@@ -3,116 +3,28 @@ import cv2
 import itertools
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 from sklearn.model_selection import KFold, train_test_split
-from sklearn import metrics
+from tqdm import tqdm
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, Dataset
-from typing import Tuple
+from torchsummary import summary
 
 # Our modules
 from network import *
+from dataset import *
 SEED = 42
 
 # Learning Makros
 BATCH_SIZE = 32
-N_EPOCHS = 240
-N_FOLDS = 10
+N_EPOCHS = 100
+N_FOLDS = 3
 TEST_RATIO = 0.2
-IMAGE_WIDTH = 1024
-IMAGE_HEIGHT = 128
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def get_y_from_file(name : str, labelFile) -> str:
-    """
-    Search for a name in list and return line below it.
-    @param name: name to search for
-    @param labelFile: list of labels
-    @return: the label of the name
-    """
-    for i, row in enumerate(labelFile):
-        if name == row:
-            return labelFile[i + 1]
-    return ""
-
-
-class IAM_Dataset(Dataset):
-    def __init__(self, images_folder : str, labels_file):
-        """
-        Complete dataset to be used for training and testing
-        @param images_folder: folder containing the images
-        @param labels_file: file containing the labels
-        """
-        # Set up Image folder
-        self.images_folder = images_folder
-        self.images_files = os.listdir(images_folder)
-        self.images_paths = [images_folder + name for name in self.images_files]
-
-        # Read gt file with labels
-        with open(labels_file, "r") as f:
-            label_gt = f.readlines()
-        label_gt = [label.strip() for label in label_gt if label.strip()]
-
-        # Get target strings and all characters used
-        self.labels = []
-        self.chars = []
-        self.n_chars = 0
-        for file_name in self.images_files:
-            # Get target label (sentence)
-            label = get_y_from_file(file_name, label_gt)
-            assert label != "", "No label found for image " + file_name
-            label = " " + label + " "
-            self.labels.append(label)
-
-            # Get all characters that are used
-            for ch in label:
-                if ch not in self.chars:
-                    self.chars.append(ch)
-            # Update Max Length
-            if len(label) > self.n_chars:
-                self.n_chars = len(label)
-        
-        print("Number of images: ", len(self.images_files))
-        print("Max length of target string: ", self.n_chars)
-        print("Number of unique characters: ", len(self.chars))
-        print("Characters: ", self.chars)
-        return
-
-    def __len__(self):
-        return len(self.images_files)
-    
-    def __getitem__(self, idx):
-        img = cv2.imread(self.images_paths[idx], cv2.IMREAD_GRAYSCALE)
-        img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
-        img = img / 255.0
-        img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
-        
-        return img, self.labels[idx]
-    
-def strings_to_targets(strings : Tuple[str]) -> torch.Tensor:
-    """
-    Convert the a tuple with the full target strings into a tensor
-    @param strings: tuple of strings
-    @return: tensor with the targets
-    """
-    # Create a list of lists with each character as a target
-    targets  = [[char for char in full_string] for full_string in strings]
-    # Flatten
-    targets_flat = [char for sublist in targets for char in sublist]
-    encoder = preprocessing.LabelEncoder()
-    encoder.fit(targets_flat)
-    targets_enc = [encoder.transform(y) for y in targets]
-    #targets_enc = np.array(targets) + 1
-
-    print(np.unique(targets_enc))
-    print(targets_enc)
-    return targets_enc
 
 def train_model(model : nn.Module, 
-                training_data : Dataset,
                 training_loader : DataLoader,
-                testing_data : Dataset,
                 testing_loader : DataLoader,
                 optimizer : optim,
                 scheduler : optim.lr_scheduler
@@ -120,47 +32,90 @@ def train_model(model : nn.Module,
     """
     Train a model on a dataset and run validation with given optimization/scheduler
     @param model: model to train
-    @param training_data: dataset to train on
     @param training_loader: loader for the training data
-    @param validation_data: dataset to validate on
     @param validation_loader: loader for the validation data
     @param optimizer: optimizer to use for training
     @param scheduler: scheduler to use for training
     @return: history of the training and validation loss/accurracy as a list
     """
     history = []
-
-
-    for ep in range(N_EPOCHS):
+    model.to(DEVICE)
+    for ep in tqdm(range(N_EPOCHS)):
         loss_train = 0.0
         acc_train = 0.0
+        loss_fn = nn.CTCLoss()
 
         # Training Loop
-        for images, full_label_strings in training_loader:
-            targets = strings_to_targets(full_label_strings)
+        for images, targets in training_loader:
+            targets_output, targets_length = targets
             optimizer.zero_grad()
             model.train()
 
             images = images.to(DEVICE)
 
             # Forward Pass
-            pred = model(images)
-            print(pred)
+            pred_rnn, pred_ctc = model(images)
+            #shape = (BatchSize, SeqLen, NumClasses)
+            # Convert to (SeqLen, BatchSize, NumClasses) for loss
+            pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
+            pred_ctc = pred_ctc.permute(1, 0, 2).log_softmax(2)
+
+            pred_int = pred_rnn.permute(1, 0, 2).argmax(2)
+
+            inputLengths = torch.full(size = (images.size(0),), 
+                                      fill_value = 128, 
+                                      dtype=torch.long)
+
+            # Compute Loss
+            loss_rnn = loss_fn(pred_rnn, targets_output, inputLengths, targets_length)
+            loss_ctc = loss_fn(pred_ctc, targets_output, inputLengths, targets_length)
+            
+            loss = loss_rnn + 0.1 * loss_ctc
 
             # Backward Pass
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            loss_train += loss.item()
+
+            # Compute accuracy
+            acc_train += (pred_int == targets_output).sum().item() / (targets_output.size(0) * targets_output.size(1))
+
 
         
         # Testing Loop
         loss_test = 0.0
         acc_test = 0.0
         with torch.no_grad():
-            for images, labels in testing_loader:
+            for images, targets in testing_loader:
+                targets_output, targets_length = targets
                 model.eval()
 
                 images = images.to(DEVICE)
-                print(images.shape, labels)
+                
                 # Forward Pass
-                pred = model(images)
+                pred_rnn, pred_ctc = model(images)
+                #shape = (BatchSize, SeqLen, NumClasses)
+                # Convert to (SeqLen, BatchSize, NumClasses) for loss
+                pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
+                pred_ctc = pred_ctc.permute(1, 0, 2).log_softmax(2)
+
+                inputLengths = torch.full(size = (images.size(0),),
+                                            fill_value = 128,
+                                            dtype=torch.long)
+                
+                # Compute Loss
+                loss_rnn = loss_fn(pred_rnn, targets_output, inputLengths, targets_length)
+                loss_ctc = loss_fn(pred_ctc, targets_output, inputLengths, targets_length)
+
+                loss = loss_rnn + 0.1 * loss_ctc
+                loss_test += loss.item()
+
+                # Compute accuracy
+                pred_int = pred_rnn.permute(1, 0, 2).argmax(2)
+                acc_test += (pred_int == targets_output).sum().item() / (targets_output.size(0) * targets_output.size(1))
+
+
 
         # End of Epoch
         history.append((
@@ -168,6 +123,7 @@ def train_model(model : nn.Module,
             (loss_train, acc_train),
             (loss_test, acc_test)
         ))
+
     return history
 
 # Training script to train the Recurrent_CNN model for task 2. outputs the model to a file as well as results
@@ -183,35 +139,32 @@ if __name__ == "__main__":
     print("Training data: ", len(train_data))
     print("Testing data: ", len(test_data))
 
-
     # Set up KFold
     kFolds = KFold(n_splits = N_FOLDS, shuffle = True, random_state = SEED)
     # Parameters to search for
     parameters = {
         "learning_rate": [0.001, 0.0001],
         "beta": [(0.9, 0.999), (0.95, 0.999)],
-        "rnn_size": [128, 256],
-        "rnn_dropout": [0.25, 0.5]
+        "rnn_dropout": [0.1, 0.25, 0.5],
+        "conv_dropout": [0.1, 0.25, 0.5],
     }
     paramList = list(itertools.product(*parameters.values()))
 
     best_loss = 1000000
-    best_params = []
-
+    best_params = [0.0001, (0.9, 0.999), 0.25, 0.25]
+    """
     # Train different models for multiple folds
     for params in paramList:
         print("Training with parameters: ", params)
-        learning_rate, beta, rnn_size, rnn_dropout = params
+        learning_rate, beta, rnn_dropout, conv_dropout = params
 
         losses = []
         for train_idx, test_idx in kFolds.split(train_data):
             # Set up CRNN model + optimizer
             model = Recurrent_CNN(Data.n_chars, 
-                                  rnn_size_1=rnn_size, rnn_dropout_1=rnn_dropout,
-                                  rnn_size_2=rnn_size, rnn_dropout_2=rnn_dropout,
-                                  rnn_size_3=rnn_size, rnn_dropout_3=rnn_dropout
+                                  rnn_dropout = rnn_dropout,
+                                  Conv_dropout = conv_dropout
                                   )
-            model.to(DEVICE)
 
             optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=beta)
             scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 30, gamma = 0.1)
@@ -224,9 +177,7 @@ if __name__ == "__main__":
 
             #
             history = train_model(model = model,
-                                  training_data = train_data_fold,
                                   training_loader = train_loader,
-                                  testing_data = test_data_fold,
                                   testing_loader = test_loader,
                                   optimizer = optimizer,
                                   scheduler = scheduler)
@@ -239,28 +190,26 @@ if __name__ == "__main__":
             best_loss = mean_loss
             best_params = params
             print("New best model found with parameters: ", params)
-    
+    """
     ##########################################################################################################
     # Train the best model with all the training data and test on testing data
     # Save the performance and model at the end
     ##########################################################################################################
     print("Best model found with parameters: ", best_params)
-    learning_rate, beta, rnn_size, rnn_dropout = best_params
-    model = Recurrent_CNN(Data.n_chars, 
-                          rnn_size_1=rnn_size, rnn_dropout_1=rnn_dropout,
-                          rnn_size_2=rnn_size, rnn_dropout_2=rnn_dropout,
-                          rnn_size_3=rnn_size, rnn_dropout_3=rnn_dropout)
-    model.to(DEVICE)
+    learning_rate, beta, rnn_dropout, conv_dropout = best_params
+    model = Recurrent_CNN(Data.n_chars,
+                          rnn_dropout = rnn_dropout,
+                          Conv_dropout = conv_dropout
+                          )
+    #model.to(DEVICE)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=beta)
-
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 30, gamma = 0.1)
     train_loader = DataLoader(train_data, batch_size = BATCH_SIZE, shuffle = True)
     test_loader = DataLoader(test_data, batch_size = BATCH_SIZE, shuffle = False)
 
     history = train_model(model = model,
-                          training_data = train_data,
                           training_loader = train_loader,
-                          validation_data = test_data,
-                          validation_loader = test_loader,
+                          testing_loader = test_loader,
                           optimizer = optimizer,
                           scheduler = scheduler
                           )
