@@ -23,6 +23,7 @@ TEST_RATIO = 0.2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+
 def train_model(model : nn.Module, 
                 training_loader : DataLoader,
                 testing_loader : DataLoader,
