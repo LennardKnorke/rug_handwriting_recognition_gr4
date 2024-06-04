@@ -1,35 +1,59 @@
 # Import third party modules
-import cv2
 import itertools
 import matplotlib.pyplot as plt
-import numpy as np
 from sklearn.model_selection import KFold, train_test_split
 from tqdm import tqdm
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset, Dataset
-from torchsummary import summary
+from torch.utils.data import DataLoader
+from typing import Tuple
 
 # Our modules
 from network import *
 from dataset import *
+from augmentation import WarpMLS
 SEED = 42
 
 # Learning Makros
 BATCH_SIZE = 32
-N_EPOCHS = 100
+N_EPOCHS = 240
 N_FOLDS = 3
 TEST_RATIO = 0.2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def calculate_wer(pred : str, target : str) -> float:
+    """
+    Calculate the Word Error Rate between two strings
+    @param pred: predicted string
+    @param target: target string
+    @return: Word Error Rate
+    """
+    return 0.0
 
+def calculate_cer(pred : str, target : str) -> float:
+    """
+    Calculate the Character Error Rate between two strings
+    @param pred: predicted string
+    @param target: target string
+    @return: Character Error Rate
+    """
+    return 0.0
+
+
+def ctc_decode(pred : torch.Tensor) -> str:
+    """
+    Decode the output of the CTC module
+    @param pred: output of the CTC module
+    @return: decoded string
+    """
+    return ""
 
 def train_model(model : nn.Module, 
                 training_loader : DataLoader,
                 testing_loader : DataLoader,
                 optimizer : optim,
                 scheduler : optim.lr_scheduler
-                )-> list:
+                )-> list[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """
     Train a model on a dataset and run validation with given optimization/scheduler
     @param model: model to train
@@ -37,13 +61,22 @@ def train_model(model : nn.Module,
     @param validation_loader: loader for the validation data
     @param optimizer: optimizer to use for training
     @param scheduler: scheduler to use for training
-    @return: history of the training and validation loss/accurracy as a list
+    @return: 6 lists, 3 for training 3 for testing, each containing the loss, word error rate, and character error rate
     """
-    history = []
+    train_loss = []
+    train_wer = []
+    train_cer = []
+
+    test_loss = []
+    test_wer = []
+    test_cer = []
+
     model.to(DEVICE)
-    for ep in tqdm(range(N_EPOCHS)):
-        loss_train = 0.0
-        acc_train = 0.0
+    
+    for _ in tqdm(range(N_EPOCHS)):
+        loss_train_ep = 0.0
+        wer_train_ep = 0.0
+        cer_train_ep = 0.0
         loss_fn = nn.CTCLoss()
 
         # Training Loop
@@ -77,16 +110,21 @@ def train_model(model : nn.Module,
             loss.backward()
             optimizer.step()
             scheduler.step()
-            loss_train += loss.item()
+            loss_train_ep += loss.item()
 
-            # Compute accuracy
-            acc_train += (pred_int == targets_output).sum().item() / (targets_output.size(0) * targets_output.size(1))
+            # Compute accuracies
+            wer_train_ep += 0.0
+            cer_train_ep += 0.0
 
+        train_loss.append(loss_train_ep)
+        train_wer.append(wer_train_ep)
+        train_cer.append(cer_train_ep)
 
         
         # Testing Loop
-        loss_test = 0.0
-        acc_test = 0.0
+        loss_test_ep = 0.0
+        wer_test_ep = 0.0
+        cer_test_ep = 0.0
         with torch.no_grad():
             for images, targets in testing_loader:
                 targets_output, targets_length = targets
@@ -110,22 +148,19 @@ def train_model(model : nn.Module,
                 loss_ctc = loss_fn(pred_ctc, targets_output, inputLengths, targets_length)
 
                 loss = loss_rnn + 0.1 * loss_ctc
-                loss_test += loss.item()
+                loss_test_ep += loss.item()
 
                 # Compute accuracy
                 pred_int = pred_rnn.permute(1, 0, 2).argmax(2)
-                acc_test += (pred_int == targets_output).sum().item() / (targets_output.size(0) * targets_output.size(1))
+                wer_test_ep += 0.0
+                cer_test_ep += 0.0
+
+        test_loss.append(loss_test_ep)
+        test_wer.append(wer_test_ep)
+        test_cer.append(cer_test_ep)
 
 
-
-        # End of Epoch
-        history.append((
-            ep,
-            (loss_train, acc_train),
-            (loss_test, acc_test)
-        ))
-
-    return history
+    return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer
 
 # Training script to train the Recurrent_CNN model for task 2. outputs the model to a file as well as results
 if __name__ == "__main__":
@@ -208,20 +243,19 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_data, batch_size = BATCH_SIZE, shuffle = True)
     test_loader = DataLoader(test_data, batch_size = BATCH_SIZE, shuffle = False)
 
-    history = train_model(model = model,
-                          training_loader = train_loader,
-                          testing_loader = test_loader,
-                          optimizer = optimizer,
-                          scheduler = scheduler
-                          )
-    
+    train_loss, train_wer, train_cer, test_loss, test_wer, test_cer = train_model(model = model,
+                                                                                  training_loader = train_loader,
+                                                                                  testing_loader = test_loader,
+                                                                                  optimizer = optimizer,
+                                                                                  scheduler = scheduler)
+    print(f"Final Results: \nTest Loss:{test_loss[-1]} \nTest Word Error Rate: {test_wer[-1]}\nTest Character Error Rate: {test_cer[-1]}")
     # Save the model
     torch.save(model.state_dict(), "./Task_3/IAM_the_best_model.pth")
     
     # Plot performance
     plt.figure()
-    plt.plot(history[0][0], label="Training Loss")
-    plt.plot(history[1][0], label="Testing Loss")
+    plt.plot(train_loss, label="Training Loss")
+    plt.plot(test_loss, label="Testing Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
@@ -230,12 +264,20 @@ if __name__ == "__main__":
     plt.close()
 
     plt.figure()
-    plt.plot(history[1][1], label="Testing Accuracy")
-    plt.plot(history[0][1], label="Training Accuracy")
+    plt.plot(test_cer, label="Testing CER")
+    plt.plot(train_cer, label="Training CER")
     plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
     plt.legend()
-    plt.title("Accuracy")
-    plt.savefig("./Task_3/accuracy_plot.png")
+    plt.title("Character Error Rate")
+    plt.savefig("./Task_3/cer_plot.png")
+    plt.close()
+
+    plt.figure()
+    plt.plot(test_wer, label="Testing WER")
+    plt.plot(train_wer, label="Training WER")
+    plt.xlabel("Epoch")
+    plt.legend()
+    plt.title("Word Error Rate")
+    plt.savefig("./Task_3/wer_plot.png")
     plt.close()
     # Done

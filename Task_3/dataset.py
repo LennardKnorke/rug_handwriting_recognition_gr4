@@ -4,8 +4,19 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from utils import resize_and_pad
+
 IMAGE_WIDTH = 1024
 IMAGE_HEIGHT = 128
+
+char_set = (' ',
+            'a','A','b','B','c','C','d','D','e','E','f','F','g','G','h','H','i','I','j','J','k','K','l','L','m','M','n','N','o','O','p','P','q','Q','r','R','s','S','t','T','u','U','v','V','w','W','x','X','y','Y','z','Z',
+            '0','1','2','3','4','5','6','7','8','9',
+            '\\','\'','!','"','#','$','%','&','(',')','*','+',',','-','.','/',':',';','=','>','?','_')
+n_chars = len(char_set)
+chars_to_idx = {char: idx + 1 for idx, char in enumerate(char_set)}
+idx_to_chars = {idx + 1: char for idx, char in enumerate(char_set)}
+
 
 def get_y_from_file(name : str, labelFile) -> str:
     """
@@ -37,64 +48,38 @@ class IAM_Dataset(Dataset):
             label_gt = f.readlines()
         label_gt = [label.strip() for label in label_gt if label.strip()]
 
-        # Get target strings and all characters used
-        
-        self.chars = (' ',
-                      'a','A','b','B','c','C','d','D','e','E','f','F','g','G','h','H','i','I','j','J','k','K','l','L','m','M','n','N','o','O','p','P','q','Q','r','R','s','S','t','T','u','U','v','V','w','W','x','X','y','Y','z','Z',
-                      '0','1','2','3','4','5','6','7','8','9',
-                      '\\','\'','!','"','#','$','%','&','(',')','*','+',',','-','.','/',':',';','=','>','?','_')
-        self.n_chars = len(self.chars)
-        self.chars_to_idx = {char: idx + 1 for idx, char in enumerate(self.chars)}
-        self.idx_to_chars = {idx + 1: char for idx, char in enumerate(self.chars)}
-
+        # Get target strings
         self.labels = []
         for file_name in self.images_files:
-            # Get target label (sentence)
             label = get_y_from_file(file_name, label_gt)
             assert label != "", "No label found for image " + file_name
-            label = " " + label + " "
+            label = " " + label + " " # Padding with space bars helps training
             self.labels.append(label)
             
-        
+        # Overview of the dataset and characters available
         print("Number of images: ", len(self.images_files))
-        print("Max length of target string: ", self.n_chars)
-        print("Number of unique characters: ", len(self.chars))
-        print("Characters: ", self.chars)
+        print("Max length of target string: ", max([len(label) for label in self.labels]))
+        print("Number of unique characters: ", len(char_set))
+        print("Characters: ", char_set)
         return
 
     def __len__(self):
         return len(self.images_files)
     
     def __getitem__(self, idx):
+        """
+        @return: image, (onehot_targets, target_length)
+        """
+        # Read and preprocess image
         img = cv2.imread(self.images_paths[idx], cv2.IMREAD_GRAYSCALE)
-        img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
+        img = resize_and_pad(img, IMAGE_WIDTH, IMAGE_HEIGHT)
         img = img / 255.0
-        # Resize and Padd image
         img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
-        
-        target = torch.ones(128, dtype=torch.long)
+
+        # Convert target to encoded 128 long tensor
+        target = torch.ones(128, dtype=torch.long) # IMPORTANT. DOUBLE CHECK IF PADDING IS SPACE BARS (1) OR BLANK (0)
         for i, char in enumerate(self.labels[idx]):
             target[i] = self.chars_to_idx[char]
         target_length = torch.tensor(len(self.labels[idx]), dtype = torch.long)
-        """
-        # Set up target tensor one hot encoded
-        target = torch.zeros((128, self.n_chars) , dtype=torch.float32)
-        for i, char in enumerate(self.labels[idx]):
-            target[i, self.chars_to_idx[char]] = 1.0
-        # set beyond label length idx 0 to 1
-        target[i+1:, 0] = 1.0
-        """
 
         return img, (target, target_length)
-    
-    def resizeImg(self, img, width = None, height = None):
-
-        if height is None and width is not None:
-            scale = float(width) / img.shape[1]
-            height = int(img.shape[0] * scale)
-        
-        if width is None and height is not None:
-            scale = float(height) / img.shape[0]
-            width = int(img.shape[1] * scale)
-        
-        return cv2.resize(img, (width, height)).astype(np.float32)

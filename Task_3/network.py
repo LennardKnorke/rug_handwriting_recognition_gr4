@@ -131,7 +131,6 @@ class Recurrent_CNN(nn.Module):
         @param x: input tensor
         @return: output tensor
         """
-        batch_size, channels, height, widht = image.size()
         x = self.Convolutional_Module(image)
         x = self.ResNet_Module_1(x)
         x = self.ResNet_Module_2(x)
