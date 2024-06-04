@@ -1,22 +1,11 @@
 import numpy as np
-from utils import *
-import cv2
+
 import torch
 import torch.nn.functional as F
+
+from utils import *
 # from molesq import ImageTransformer
 
-from PIL import Image
-
-from straug.blur import GaussianBlur, DefocusBlur, MotionBlur, GlassBlur, ZoomBlur
-from straug.camera import Contrast, Brightness, JpegCompression, Pixelate
-from straug.geometry import Rotate, Perspective, Shrink, TranslateX, TranslateY
-from straug.noise import GaussianNoise, ShotNoise, ImpulseNoise, SpeckleNoise
-from straug.pattern import VGrid, HGrid, Grid, RectGrid, EllipseGrid
-from straug.process import Posterize, Solarize, Invert, Equalize, AutoContrast, Sharpness, Color
-from straug.warp import Curve, Distort, Stretch
-from straug.weather import Fog, Snow, Frost, Rain, Shadow
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # torch.autograd.set_detect_anomaly(True)
 
 ##############################################
@@ -267,7 +256,7 @@ def distort_batch(images, n_patches, radius, S, radii_list=None):
             distort_img, _ = distort(images[i], n_patches, radius, S_cpu[i], radii=radii_list[i])
         aug_images[i] = torch.from_numpy(distort_img)
 
-    aug_images = aug_images.reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
+    aug_images = aug_images.reshape((len(images), 1, IMAGE_HEIGHT, IMAGE_WIDTH))
     if new_radii_list: return aug_images, new_radii_list
     return aug_images
 
@@ -282,7 +271,7 @@ def augment_data(images, n_patches, radius, agent=None):
             outputs of the agent, moving state of the distortion, moving state of the random distortion.
             If agent is not provided, returns only randomly augmented images
     """
-    images = images.to(device)
+    images = images.to(DEVICE)
 
     if agent is not None:
         agent_outputs = agent(images)
@@ -310,8 +299,8 @@ def augment_data(images, n_patches, radius, agent=None):
         return aug_S
 
 def learning_agent_loss(outputs, outputs_S2, labels, agent_outputs, S, S2):
-    S = S.to(device)
-    S2 = S2.to(device)
+    S = S.to(DEVICE)
+    S2 = S2.to(DEVICE)
 
     # use "edit distance" 1 or 0
     # recognizer_loss_S = torch.max(outputs, 1).indices != torch.max(labels, 1).indices
@@ -374,113 +363,3 @@ def train(outputs, outputs_S2, labels, agent_opt, agent_outputs, S, S2):
         agent_opt.step()
         return loss.item()
     return 0.0
-
-def draw_augment_arrows(img, src_pts, dst_pts, radius):
-    """
-    Preview distortion with arrows from source points to destination points, displayed using the maximum radius.
-    """
-    img = cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
-    img = cv2.copyMakeBorder(img, radius, radius, radius, radius, cv2.BORDER_CONSTANT)
-    for j in range(len(src_pts)):
-        img = cv2.arrowedLine(img, (src_pts[j][0]+radius,src_pts[j][1]+radius), (dst_pts[j][0]+radius,dst_pts[j][1]+radius), color=(0, 0, 255), thickness=4)
-    return img
-    
-def elastic_demo(img_file, n_patches, radius):
-    im = file_to_img(img_file)
-    distort_img_list = list()
-    for _ in range(100):
-        if n_patches == 4: S = np.random.randint(2,size=5*2).reshape((5, 2))
-        else: S = np.random.randint(2,size=2*(n_patches+1)*2).reshape((2*(n_patches+1), 2))
-        distort_img, src_pts, dst_pts = distort(im, n_patches, radius, S, return_points=True)
-        distort_img = draw_augment_arrows(distort_img, src_pts, dst_pts, radius)
-        distort_img_list.append(distort_img)
-    create_gif(distort_img_list, r'img/distort.gif')
-
-class Random_StrAug(object):
-    def __init__(self, using_aug_types, N, M):
-        self.N = N
-        self.M = M
-        self.aug_list = []
-        if 'warp' in using_aug_types:
-            self.aug_list.extend([Curve(), Distort(), Stretch()]) 
-        if 'geometry' in using_aug_types:
-            self.aug_list.extend([Rotate(), Perspective(), Shrink(), TranslateX(), TranslateY()]) 
-        # if 'blur' in using_aug_types:
-        #     self.aug_list.append([GaussianBlur(), DefocusBlur(), MotionBlur(), GlassBlur(), ZoomBlur()]) 
-        if 'noise' in using_aug_types:
-            # self.aug_list.extend([GaussianNoise(), ShotNoise(), ImpulseNoise(), SpeckleNoise()]) 
-            self.aug_list.extend([GaussianNoise(), ImpulseNoise(), SpeckleNoise()]) 
-        if 'camera' in using_aug_types:
-            # self.aug_list.append([Contrast(), Brightness(), JpegCompression(), Pixelate()]) 
-            self.aug_list.extend([Pixelate()]) 
-        if 'pattern' in using_aug_types:
-            self.aug_list.extend([VGrid(), HGrid(), Grid(), RectGrid(), EllipseGrid()]) 
-        # if 'process' in using_aug_types:
-        #     self.aug_list.append([Posterize(), Solarize(), Invert(), Equalize(), AutoContrast(), Sharpness(), Color()])
-        if 'weather' in using_aug_types:
-            # self.aug_list.append([Fog(), Snow(), Frost(), Rain(), Shadow()]) 
-            self.aug_list.extend([Snow(), Rain()]) 
-    
-        self.mag_range = np.random.randint(0, 3)
-
-    def __call__(self, img):
-        for _ in range(self.N):
-            # img = self.aug_list[i][np.random.randint(0, len(self.aug_list[i]))](img, mag = self.mag_range, prob = self.prob_list[i])
-            img = self.aug_list[np.random.randint(0, len(self.aug_list))](img, mag = self.M, prob = 1)
-
-        return img
-    
-def straug_data(images, straug_sampler):
-    """
-    Augment images with StrAug.
-    @param images: Images to augment
-    @param agent: Augmentation agent.
-    @return Augmented images
-    """
-    images = torch.squeeze(images, 1)
-    aug_images = torch.empty_like(images).detach().cpu()
-    images = images.detach().cpu().numpy()
-    for i in range(len(images)):
-        distort_img = Image.fromarray(images[i])
-        distort_img = straug_sampler(distort_img)
-        distort_img = np.array(distort_img)
-        distort_img = cv2.cvtColor(distort_img, cv2.COLOR_RGB2BGR)
-        distort_img = cv2.cvtColor(distort_img, cv2.COLOR_BGR2GRAY)
-        distort_img = cv2.threshold(distort_img, 120, 255, cv2.THRESH_BINARY)[1]
-        aug_images[i] = torch.from_numpy(distort_img)
-
-    aug_images = aug_images.reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
-    return aug_images
-    
-def straug_demo(N, M):
-    groups = ['warp', 'geometry', 'noise', 'camera', 'pattern', 'weather']
-
-    # random_StrAug_1 = Random_StrAug(groups, prob_list = [0.5, 0.3, 0.2, 0.2, 0.1, 0.1])
-    random_StrAug_1 = Random_StrAug(groups, N, M)
-    
-    pth = "img//straug"
-    img_file = "img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm"
-    os.makedirs(pth, exist_ok=True)
-
-    img = cv2.imread(img_file,-1)
-    img = resize_and_pad(img)
-    img = Image.fromarray(img)
-    
-    augmented_img_1 = random_StrAug_1(img)
-
-    # Save images to compare before and after augmentation.
-    result = cv2.cvtColor(np.hstack((np.array(img), np.array(augmented_img_1))), cv2.COLOR_RGB2BGR)
-    result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-    result = cv2.threshold(result, 120, 255, cv2.THRESH_BINARY)[1]
-    cv2.imwrite(os.path.join(pth, 'random_strAug.png'), result)
-
-##############################################
-#
-##############################################
-if __name__ == '__main__':
-    print("Running the augmentation script only")
-    # elastic_demo("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm",
-        #  2, 10)
-    straug_demo(3, 2)
-
-    

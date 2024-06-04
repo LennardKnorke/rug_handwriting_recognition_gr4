@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn  
+import numpy as np
+
 
 class Recurrent_CNN(nn.Module):
     def __init__(self,
@@ -18,14 +20,6 @@ class Recurrent_CNN(nn.Module):
         Initialize a RCNN model
         @param input_size: size of the input tensor
         @param num_classes: number of classes to predict
-        
-        @param cnn_channels_1: number of output channels in the first convolutional layer
-        @param cnn_kernel_1: size of the kernel in the first convolutional layer
-        @param cnn_stride_1: stride of the first convolutional layer
-        @param cnn_padding_1: padding of the first convolutional layer
-
-        @param rnn_size_1: number of neurons of the first recurrent layer
-        @param rnn_dropout_1: dropout rate of the first recurrent layer
         """
         super(Recurrent_CNN, self).__init__()
         # Set up Convolutional Layers
@@ -148,3 +142,41 @@ class Recurrent_CNN(nn.Module):
 
         return output_rnn, output_ctc.permute(0, 2, 1) # Returns both as (BatchSize, SeqLen, NumClasses)
 
+
+
+class AugmentAgentCNN(nn.Module):
+    def __init__(
+        self,
+        n_points: int
+    ):
+        super(AugmentAgentCNN, self).__init__()
+        self.n_points = n_points
+        self.n_patches = (n_points//2)-1
+
+        self.pool = nn.AvgPool2d(kernel_size=(2, 2))
+        
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=(3,3), stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 64, kernel_size=(3,3), stride=1, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=(3,3), stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(128)
+        self.conv4 = nn.Conv2d(128, 128, kernel_size=(3,3), stride=1, padding=1)
+        self.conv5 = nn.Conv2d(128, 64, kernel_size=(3,3), stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.conv6 = nn.Conv2d(64, 16, kernel_size=(3,3), stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(16)
+        self.fc1 = nn.Linear(192, 8*(self.n_patches+1))
+
+    def forward(
+        self, state: np.ndarray
+    ):
+        x = self.pool(nn.functional.relu(self.conv1(state)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = nn.functional.relu(self.bn1(self.conv3(x)))
+        x = self.pool(nn.functional.relu(self.conv4(x)))
+        x = nn.functional.relu(self.bn2(self.conv5(x)))
+        x = self.pool(nn.functional.relu(self.bn3(self.conv6(x))))
+        x = x.view(-1, 192)
+        x = self.fc1(x)
+        x = x.view(-1, self.n_points, 2, 2)
+        x = nn.functional.softmax(x,3)
+        return x

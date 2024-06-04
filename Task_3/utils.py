@@ -1,194 +1,24 @@
-import os
 import cv2
+import torch
 import numpy as np
-import torch.nn as nn
-import imageio.v3 as iio
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
-from joblib import dump
-import math
 
+# MAKROS
+SEED : int = 42
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TEXT_HEIGHT : int = 1000      # The height of the full unsegmented text (Optional)
-TEXT_WIDTH : int = 1000       # The width of the full unsegmented text (Optional)
+IMAGE_WIDTH : int = 1024 #Either 1024 or 128
+IMAGE_HEIGHT = 128 #Either 128 or 32
+MAX_SEQ_LENGTH = 128
 
-CHARACTER_HEIGHT : int = 70  # The height of a single character for Dead sea scrolls
-CHARACTER_WIDTH : int = 50   # The width of a single character for Dead sea scrolls
+CHAR_SET = (' ',
+            'a','A','b','B','c','C','d','D','e','E','f','F','g','G','h','H','i','I','j','J','k','K','l','L','m','M','n','N','o','O','p','P','q','Q','r','R','s','S','t','T','u','U','v','V','w','W','x','X','y','Y','z','Z',
+            '0','1','2','3','4','5','6','7','8','9',
+            '\\','\'','!','"','#','$','%','&','(',')','*','+',',','-','.','/',':',';','=','>','?','_')
+N_CHARS = len(CHAR_SET)
+CHAR_TO_IDX : dict = {char: idx + 1 for idx, char in enumerate(CHAR_SET)} #convert chars to ints 0 is reserved for padding
+IDX_TO_CHAR : dict = {idx + 1: char for idx, char in enumerate(CHAR_SET)} #convert ints to chars 0 is reserved for padding
 
-USE_BINARY : bool = True       # Set to True if the images to use are already binarized. False if they are RGB and we binarize ourselves
-BINARY_THRESHOLD : int = 100   # The threshold to use when binarizing the images.
-
-BATCH_SIZE : int = 64
-
-RECOGNIZER_LOSS_FUNCTION = nn.CrossEntropyLoss()
-
-
-def get_image_paths(folder_path : str) -> list:
-    """
-    This function reads all the images in a folder and returns them as a list.
-    @param folder_path: The path to the folder containing the images.
-    @return list of images.
-    """
-    image_paths = []
-    for file in os.listdir(folder_path):
-        if file.endswith(".jpg"):
-            file_type = file.split("-")[-1].split(".")[0]
-            if (USE_BINARY and file_type == "binarized") or (not USE_BINARY and file_type == "R01"):
-                image_paths.append(folder_path+file)
-    print("Found", len(image_paths), "images.")
-    return image_paths
-
-def create_gif(image_list, gif_name, duration=0.1):
-    """
-    Create a gif from a list of images.
-    @param image_list: The list of images to use.
-    @param gif_name: The name of the gif file to save.
-    @param duration: The duration of each frame in the gif.
-    """
-    frames = []
-    for image in image_list:
-        frames.append(image)
-    iio.imwrite(gif_name, frames, duration=duration, loop=0)
-    return
-
-def file_to_img(path : str, resize=True, pad=True) -> np.ndarray:
-    """
-    Read an image file and return it resized as a numpy array.
-    @param path: The path to the image file.
-    @param resize: Whether the image should be resized to CHARACTER_HEIGHT x CHARACTER_WIDTH.
-    @param pad: Whether image smaller than CHARACTER_HEIGHT x CHARACTER_WIDTH should be padded instead.
-    @return The image as a numpy array.
-    """
-    img = cv2.imread(path,-1)
-    if resize:
-        # if not pad or img.shape[0] > CHARACTER_HEIGHT or img.shape[1] > CHARACTER_WIDTH:
-        #     img = cv2.resize(img, (CHARACTER_WIDTH, CHARACTER_HEIGHT))
-        # else:
-        #     h = (CHARACTER_HEIGHT - img.shape[0]) / 2
-        #     w = (CHARACTER_WIDTH - img.shape[1]) / 2
-        #     img = cv2.copyMakeBorder(img, math.floor(h), math.ceil(h),  math.floor(w), math.ceil(w), cv2.BORDER_CONSTANT)
-        img = resize_and_pad(img)
-    return img
-
-def show_image_dimensions():
-    """
-    Plot the widths and heights of the pre-segmented images in the Dead sea scrolls dataset
-    """
-    subfolders = [f.path for f in os.scandir("img//segmented") if f.is_dir()]
-    heights, widths = list(), list()
-    for sf in subfolders:
-        for img_file in os.listdir(sf):
-            if img_file == "Kaf-final-00010-mo=erod-smo=13-shearangle=-8.23-decoco=1-artif.pgm": continue
-            img = file_to_img(os.path.join(sf, img_file), resize=False)
-            heights.append(img.shape[0]); widths.append(img.shape[1])
-    print(f"Mean height {np.mean(heights)}, Std height {np.std(heights)}, Mean width {np.mean(widths)}, Std width {np.std(widths)}")
-
-    plt.figure(); plt.xlabel('n'); plt.ylabel('width'); plt.plot(np.sort(widths))
-    plt.figure(); plt.xlabel('n'); plt.ylabel('height'); plt.plot(np.sort(heights))
-    plt.show()
-
-
-def load_segmented_data(test_files=None, test=False):
-    """
-    Load segmented Dead sea scrolls images as a numpy array.
-    @param test_files: List of image filenames used for the test set.
-    @param test: Whether the test images should be loaded. If False while test_files is given,
-                    then the training images are loaded (the opposite of test_files).
-    @return A numpy array of images as numpy arrays.
-    """
-    n = 5536
-    if test_files is not None:
-        if test: n = len(test_files)
-        else: n -= len(test_files)
-    subfolders = [f.path for f in os.scandir("img//segmented") if f.is_dir()]
-    imgs = np.empty((n, 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
-    labels = np.empty(n, dtype='|S12')
-    img_files = np.empty(n, dtype='|S500')
-
-    i = 0
-    for sf in subfolders:
-        for img_file in os.listdir(sf):
-            if img_file == "Kaf-final-00010-mo=erod-smo=13-shearangle=-8.23-decoco=1-artif.pgm": continue
-            if test_files is not None and test != (img_file.encode() in test_files): continue
-
-            img = file_to_img(os.path.join(sf, img_file))
-            imgs[i] = img
-            img_files[i] = img_file
-            labels[i] = sf.split("\\")[-1]
-
-            i += 1
-            
-    return imgs, labels, img_files
-
-
-def create_test_split(split):
-    """
-    Create and save a train-test split of the pre-segmented images in the Dead sea scrolls dataset.
-    Only the names of the test images have to be saved.
-    """
-    _, labels, filenames = load_segmented_data()
-    _, filenames_test, _, _ = train_test_split(filenames, labels, test_size=split/100, stratify=labels, random_state=42)
-    np.save(get_test_split_filename(split), filenames_test)
-    if not os.path.exists("encoder.joblib"): create_encoder()
-
-def create_encoder():
-    """
-    Create and save an encoder.
-    """
-    _, labels, _ = load_segmented_data()
-    encoder = OneHotEncoder(sparse_output=False)
-    labels = encoder.fit(labels[:, np.newaxis])
-    dump(encoder, "encoder.joblib")
-
-def get_test_split_filename(split):
-    return f"test_split_{split}.npy"
-
-def plot_interactive(
-    aug_loss: float,
-    rec_loss: float,
-    acc: float,
-    aug_loss_line: Line2D,
-    rec_loss_line: Line2D,
-    acc_line: Line2D,
-    lta=True,
-    train_recog=True
-):
-    """
-    Add new data to the interactive plots with augmentation loss, recognizer (classifier) loss, and accuracy.
-    """
-    if lta: ep = len(aug_loss_line.get_ydata())
-    else: ep = len(rec_loss_line.get_ydata())
-    
-    to_update = []
-    if lta:
-        to_update = ["aug"]
-        if ep == 0: plt.figure("aug"); plt.xlabel('Batch'); plt.ylabel('Augmentation Loss'); plt.gca().yaxis.tick_right()
-    if train_recog:
-        to_update.extend(["rec", "acc"])
-        if ep == 0:
-            plt.figure("rec"); plt.xlabel('Batch'); plt.ylabel('Classifier Loss'); plt.gca().yaxis.tick_right()
-            plt.figure("acc"); plt.xlabel('Batch'); plt.ylabel('Accuracy'); plt.gca().yaxis.tick_right()
-
-    for i, x in enumerate(["aug", "rec", "acc"]):
-        if x not in to_update: continue
-        plt.figure(x)
-        ax = plt.gca()
-        line = [aug_loss_line, rec_loss_line, acc_line][i]
-
-        data = line.get_ydata()
-        if x == "aug": ax.set_ylim([0, sum(data[-20:])/10])
-        if x == "rec": ax.set_ylim([0, sum(data[-20:])/10])
-        if x == "acc": ax.set_ylim([1 - (1 - (sum(data[-20:])/20))*2, 1])
-
-        plt.axvline(ep, alpha=0.0)
-        line.set_xdata(np.append(line.get_xdata(), ep))
-        line.set_ydata(np.append(line.get_ydata(), [aug_loss, rec_loss, acc][i]))
-
-    plt.pause(0.00001)
-
-def resize_and_pad(image, size=(CHARACTER_WIDTH, CHARACTER_HEIGHT)):
+def resize_and_pad(image, size=(IMAGE_WIDTH, IMAGE_HEIGHT)):
     """
     Resizes and pads an image to a specified size while maintaining the aspect ratio.
 
@@ -219,54 +49,110 @@ def resize_and_pad(image, size=(CHARACTER_WIDTH, CHARACTER_HEIGHT)):
 
     return new_image
 
-def uniquify(path, find=False):
+
+def ctc_decode(pred_ints : torch.Tensor, blank : int = 0) -> list:
     """
-    Adapt the filename so that it doesn't overwrite.
-    @param path: Path to possible modify.
-    @param find: Instead of modifying path, find the name of the latest version.
-    @return (Possibly) modified pathname such as 'file.ext' 'file (1).ext' or 'file (2).ext'
-            If find is True, then it returns the name of the latest version.
+    Decode the batch output of the CTC module
+    @param pred: output of the CRNN model (BatchSize, 128)
+    @return: decoded strings (BatchSize, Strings of variable length)
     """
-    filename, extension = os.path.splitext(path)
-    counter = 1
+    decoded_strs = []
 
-    while os.path.exists(path):
-        path = filename + " (" + str(counter) + ")" + extension
-        counter += 1
+    # Loop through all samples
+    for i in range(pred_ints.shape[0]):
+        string = ""
+        prev_int = blank
+        # Loop through all characters
+        for j in range(pred_ints.shape[1]):
+            # Append integers, skip blanks and duplicates
+            index = pred_ints[i, j].item()
+            if index != blank and index != prev_int:
+                string += IDX_TO_CHAR[index]
+            prev_int = index
+        decoded_strs.append(string)
 
-    if find:
-        if counter == 2: return filename + extension
-        elif counter > 2: return filename + " (" + str(counter-2) + ")" + extension
-    return path
+    return decoded_strs
 
-def hebrewize(roman):
-    d = {
-         'Alef': 'א',
-         'Ayin': 'ע',
-         'Bet': 'ב',
-         'Dalet': 'ד',
-         'Gimel': 'ג',
-         'He': 'ה',
-         'Het': 'ח',
-         'Kaf': 'כ',
-         'Kaf-final': 'ך',
-         'Lamed': 'ל',
-         'Mem': 'ם',
-         'Mem-medial': 'מ',
-         'Nun-final': 'ן',
-         'Nun-medial': 'נ',
-         'Pe': 'פ',
-         'Pe-final': 'ף',
-         'Qof': 'ק',
-         'Resh': 'ר',
-         'Samekh': 'ס',
-         'Shin': 'ש',
-         'Taw': 'ת',
-         'Tet': 'ט',
-         'Tsadi-final': 'ץ',
-         'Tsadi-medial': 'צ',
-         'Waw': 'ו',
-         'Yod': 'י',
-         'Zayin': 'ז'
-    }
-    return d[roman]
+def get_error_rates(predictions : list, targets : list) -> tuple:
+    """
+    Calculate the Word Error Rate and Character Error Rate between two lists of strings
+    @param pred: list of predicted strings
+    @param target: list of target strings
+    @return: Word Error Rate, Character Error Rate
+    """
+    avg_wer : float = 0.0
+    avg_cer : float = 0.0
+    n = len(predictions)
+
+    for x, y in zip(predictions, targets):
+        avg_wer += calculate_wer(x, y)
+        avg_cer += calculate_cer(x, y)
+    avg_cer /= n
+    avg_wer /= n
+
+    return avg_wer, avg_cer
+
+def levenstein_distance(str1 : str, str2 : str):
+    """
+    Calculate levenshtein distance:
+    Taken from https://www.geeksforgeeks.org/introduction-to-levenshtein-distance/!
+
+    @param pred: predicted string
+    @param target: target string
+    @return: levenshtein distance as int
+    """
+    # Get the lengths of the input strings
+    m = len(str1)
+    n = len(str2)
+ 
+    # Initialize two rows for dynamic programming
+    prev_row = [j for j in range(n + 1)]
+    curr_row = [0] * (n + 1)
+ 
+    # Dynamic programming to fill the matrix
+    for i in range(1, m + 1):
+        # Initialize the first element of the current row
+        curr_row[0] = i
+ 
+        for j in range(1, n + 1):
+            if str1[i - 1] == str2[j - 1]:
+                # Characters match, no operation needed
+                curr_row[j] = prev_row[j - 1]
+            else:
+                # Choose the minimum cost operation
+                curr_row[j] = 1 + min(
+                    curr_row[j - 1],  # Insert
+                    prev_row[j],      # Remove
+                    prev_row[j - 1]    # Replace
+                )
+ 
+        # Update the previous row with the current row
+        prev_row = curr_row.copy()
+ 
+    # The final element in the last row contains the Levenshtein distance
+    return curr_row[n]
+
+
+def calculate_wer(prediction : str, target : str) -> float:
+    """
+    Calculate the Word Error Rate between two strings
+    @param pred: list of predicted strings
+    @param target: list of target strings
+    @return: Word Error Rate (float)
+    """
+    pred_words = prediction.split()
+    target_words = target.split()
+    n = len(target_words)
+
+    hits = levenstein_distance(pred_words, target_words)
+    return hits / n
+
+def calculate_cer(predictions : str, targets : str) -> float:
+    """
+    Calculate the Character Error Rate between two strings
+    @param pred: predicted string
+    @param target: target string
+    @return: Character Error Rate
+    """
+    cer = levenstein_distance(predictions, targets) / len(targets)
+    return cer
