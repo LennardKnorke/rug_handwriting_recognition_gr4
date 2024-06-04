@@ -50,6 +50,7 @@ def train_model(model : nn.Module,
     test_cer = []
 
     model.to(DEVICE)
+    augmentation_model.to(DEVICE)
     
     for ep in tqdm(range(N_EPOCHS)):
         loss_train_ep = 0.0
@@ -59,14 +60,20 @@ def train_model(model : nn.Module,
 
         # Training Loop
         for images, targets in training_loader:
-            targets_encoded, targets_length, targets_strings = targets
             optimizer.zero_grad()
             model.train()
+            augmentation_model.train()
+
+            targets_encoded, targets_length, targets_strings = targets
 
             images = images.to(DEVICE)
+            aug_img, aug_S2, agent_outputs, S, S2 = augment_data(images = images,
+                                                                 n_patches = aug_model.n_patches,
+                                                                 radius = 5,
+                                                                 agent = augmentation_model)
 
             # Forward Pass
-            pred_rnn, pred_ctc = model(images)
+            pred_rnn, pred_ctc = model(aug_img)
             #shape = (BatchSize, SeqLen, NumClasses)
             # Convert to (SeqLen, BatchSize, NumClasses) for loss
             pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
@@ -97,6 +104,16 @@ def train_model(model : nn.Module,
             wer_train_ep += wer
             cer_train_ep += cer
 
+            # Augmentation Training step
+            outputs_S2 = model(aug_S2)
+            train(outputs = pred_rnn,
+                  outputs_S2 = outputs_S2,
+                  labels = targets_encoded,
+                  agent_opt = augmentation_optimizer,
+                  agent_outputs = agent_outputs,
+                  S = S,
+                  S2 = S2)
+
         train_loss.append(loss_train_ep)
         train_wer.append(wer_train_ep / len(training_loader))
         train_cer.append(cer_train_ep / len(training_loader))
@@ -108,7 +125,7 @@ def train_model(model : nn.Module,
         cer_test_ep = 0.0
         with torch.no_grad():
             for images, targets in testing_loader:
-                targets_output, targets_length = targets
+                targets_encoded, targets_length, targets_strings = targets
                 model.eval()
 
                 images = images.to(DEVICE)
@@ -125,8 +142,8 @@ def train_model(model : nn.Module,
                                             dtype=torch.long)
                 
                 # Compute Loss
-                loss_rnn = loss_fn(pred_rnn, targets_output, inputLengths, targets_length)
-                loss_ctc = loss_fn(pred_ctc, targets_output, inputLengths, targets_length)
+                loss_rnn = loss_fn(pred_rnn, targets_encoded, inputLengths, targets_length)
+                loss_ctc = loss_fn(pred_ctc, targets_encoded, inputLengths, targets_length)
 
                 loss = loss_rnn + 0.1 * loss_ctc
                 loss_test_ep += loss.item()

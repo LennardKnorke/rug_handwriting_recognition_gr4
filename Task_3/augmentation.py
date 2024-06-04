@@ -4,13 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from utils import *
-# from molesq import ImageTransformer
 
-# torch.autograd.set_detect_anomaly(True)
-
-##############################################
-# CLASSES AND FUNCTIONS FOR THE AUGMENTATION SECTION
-##############################################
 class WarpMLS:
     """
     Moving Least Squares transformation on an image, given some number of source points and distance points.
