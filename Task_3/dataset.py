@@ -55,13 +55,14 @@ class IAM_Dataset(Dataset):
     
     def __getitem__(self, idx):
         """
-        @return: image, (onehot_targets, target_length)
+        @return: image (as image file path), (encoded target, target_length, target string)
         """
         # Read and preprocess image
-        img = cv2.imread(self.images_paths[idx], cv2.IMREAD_GRAYSCALE)
-        img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
-        img = img / 255.0
-        img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        img = self.images_paths[idx]
+        #img = cv2.imread(self.images_paths[idx], cv2.IMREAD_GRAYSCALE)
+        #img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
+        #img = img / 255.0
+        #img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
 
         # Convert target to encoded 128 long tensor
         target_enc = torch.zeros(MAX_SEQ_LENGTH, dtype=torch.long) # IMPORTANT. DOUBLE CHECK IF PADDING IS SPACE BARS (1) OR BLANK (0)
@@ -70,4 +71,4 @@ class IAM_Dataset(Dataset):
         target_length = torch.tensor(len(self.labels[idx]), dtype = torch.long)
 
         # Return the preprocessed image, encoded target, the strings length and the original string
-        return img, (target_enc, target_length, self.labels[idx])
+        return img, (target_enc, target_length, img)

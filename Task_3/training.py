@@ -15,10 +15,10 @@ from network import *
 from utils import *
 
 # Makros only relevant for training
-BATCH_SIZE = 32
-N_EPOCHS = 240
+BATCH_SIZE = 16
+N_EPOCHS = 1_0
 N_FOLDS = 5
-TEST_RATIO = 0.2
+TEST_RATIO = 0.5
 
 def train_model(model : nn.Module, 
                 augmentation_model : nn.Module,
@@ -56,24 +56,26 @@ def train_model(model : nn.Module,
         loss_train_ep = 0.0
         wer_train_ep = 0.0
         cer_train_ep = 0.0
-        loss_fn = nn.CTCLoss()
+        loss_fn = nn.CTCLoss(zero_infinity = True)
 
         # Training Loop
+        model.train()
         for images, targets in training_loader:
             optimizer.zero_grad()
-            model.train()
-            augmentation_model.train()
-
+            
+            
+            images = load_image_batch(images)
             targets_encoded, targets_length, targets_strings = targets
 
-            images = images.to(DEVICE)
-            aug_img, aug_S2, agent_outputs, S, S2 = augment_data(images = images,
-                                                                 n_patches = aug_model.n_patches,
-                                                                 radius = 5,
-                                                                 agent = augmentation_model)
-
+            # Augmentation step
+            """
+            augmentation_model.train()
+            """
+            # Preprocess images
+            images = preprocess_batch(images)
             # Forward Pass
-            pred_rnn, pred_ctc = model(aug_img)
+            images = images.to(DEVICE)
+            pred_rnn, pred_ctc = model(images)
             #shape = (BatchSize, SeqLen, NumClasses)
             # Convert to (SeqLen, BatchSize, NumClasses) for loss
             pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
@@ -84,15 +86,12 @@ def train_model(model : nn.Module,
                                       dtype=torch.long)
 
             # Compute Loss
-            loss_rnn = loss_fn(pred_rnn, targets_encoded, inputLengths, targets_length)
-            loss_ctc = loss_fn(pred_ctc, targets_encoded, inputLengths, targets_length)
-            
-            loss = loss_rnn + 0.1 * loss_ctc
+            loss = loss_fn(pred_rnn.cpu(), targets_encoded, inputLengths, targets_length)            
+            loss += 0.1 * loss_fn(pred_ctc.cpu(), targets_encoded, inputLengths, targets_length)
 
             # Backward Pass
             loss.backward()
             optimizer.step()
-            scheduler.step()
             loss_train_ep += loss.item()
 
             # Compute accuracies
@@ -105,6 +104,7 @@ def train_model(model : nn.Module,
             cer_train_ep += cer
 
             # Augmentation Training step
+            """
             outputs_S2 = model(aug_S2)
             train(outputs = pred_rnn,
                   outputs_S2 = outputs_S2,
@@ -113,6 +113,7 @@ def train_model(model : nn.Module,
                   agent_outputs = agent_outputs,
                   S = S,
                   S2 = S2)
+            """
 
         train_loss.append(loss_train_ep)
         train_wer.append(wer_train_ep / len(training_loader))
@@ -123,11 +124,12 @@ def train_model(model : nn.Module,
         loss_test_ep = 0.0
         wer_test_ep = 0.0
         cer_test_ep = 0.0
+        model.eval()
         with torch.no_grad():
             for images, targets in testing_loader:
-                targets_encoded, targets_length, targets_strings = targets
-                model.eval()
 
+                targets_encoded, targets_length, targets_strings = targets
+                images = preprocess_batch(load_image_batch(images))
                 images = images.to(DEVICE)
                 
                 # Forward Pass
@@ -142,10 +144,9 @@ def train_model(model : nn.Module,
                                             dtype=torch.long)
                 
                 # Compute Loss
-                loss_rnn = loss_fn(pred_rnn, targets_encoded, inputLengths, targets_length)
-                loss_ctc = loss_fn(pred_ctc, targets_encoded, inputLengths, targets_length)
-
-                loss = loss_rnn + 0.1 * loss_ctc
+                loss = loss_fn(pred_rnn.cpu(), targets_encoded, inputLengths, targets_length)            
+                #loss += 0.1 * loss_fn(pred_ctc.cpu(), targets_encoded, inputLengths, targets_length)
+                # AUTHORS SUGGESTED OMMITING THE CTC OUTPUT BEYOND TRAINING
                 loss_test_ep += loss.item()
 
                 # Compute testing error rates
@@ -154,7 +155,8 @@ def train_model(model : nn.Module,
                 wer, cer = get_error_rates(decoded_strings, targets_strings)
                 wer_test_ep += wer
                 cer_test_ep += cer
-
+        # End of Epoch
+        scheduler.step()
         test_loss.append(loss_test_ep)
         test_wer.append(wer_test_ep/ len(testing_loader))
         test_cer.append(cer_test_ep / len(testing_loader))
@@ -181,15 +183,13 @@ if __name__ == "__main__":
     kFolds = KFold(n_splits = N_FOLDS, shuffle = True, random_state = SEED)
     # Parameters to search for
     parameters = {
-        "learning_rate": [0.001, 0.0001],
-        "rnn_dropout": [0.1, 0.25, 0.5],
-        "conv_dropout": [0.1, 0.25],
+        "conv_dropout": [0.0, 0.1, 0.25],        # Might not be needed in case we figure our THEIR code
         "augmentation_patches": [1, 2, 3],
     }
     paramList = list(itertools.product(*parameters.values()))
 
     best_loss = 1000000
-    best_params = [0.0001, 0.25, 0.25, 2]
+    best_params = [0.0, 2]
     """
     # Train different models for multiple folds
     for params in paramList:
@@ -234,14 +234,13 @@ if __name__ == "__main__":
     # Save the performance and model at the end
     ##########################################################################################################
     print("Best model found with parameters: ", best_params)
-    learning_rate, rnn_dropout, conv_dropout, n_patches = best_params
-    model = Recurrent_CNN(N_CHARS,
-                          rnn_dropout = rnn_dropout,
+    conv_dropout, n_patches = best_params
+    model = Recurrent_CNN(N_CHARS + 1,
                           Conv_dropout = conv_dropout
                           )
     
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 30, gamma = 0.1)
+    optimizer = optim.Adam(model.parameters(), lr = 0.001)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones = [120, 180], gamma = 0.1)
 
     n_points = 2*(n_patches + 1)
     aug_model = AugmentAgentCNN(n_points)
@@ -256,7 +255,8 @@ if __name__ == "__main__":
                                                                                   testing_loader = test_loader,
                                                                                   optimizer = optimizer,
                                                                                   scheduler = scheduler,
-                                                                                  augmentation_optimizer = aug_optimizer)
+                                                                                  augmentation_optimizer = aug_optimizer,
+                                                                                  print_epochs = True)
     print(f"Final Results: \nTest Loss:{test_loss[-1]} \nTest Word Error Rate: {test_wer[-1]}\nTest Character Error Rate: {test_cer[-1]}")
     # Save the model
     torch.save(model.state_dict(), "./Task_3/IAM_the_best_model.pth")

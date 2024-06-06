@@ -1,7 +1,8 @@
 import cv2
 import torch
+import torchvision
 import numpy as np
-
+import fastwer
 # MAKROS
 SEED : int = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -17,6 +18,32 @@ CHAR_SET = (' ',
 N_CHARS = len(CHAR_SET)
 CHAR_TO_IDX : dict = {char: idx + 1 for idx, char in enumerate(CHAR_SET)} #convert chars to ints 0 is reserved for padding
 IDX_TO_CHAR : dict = {idx + 1: char for idx, char in enumerate(CHAR_SET)} #convert ints to chars 0 is reserved for padding
+
+
+def preprocess_batch(images : list)->torch.Tensor:
+    new_images = []
+    for img in images:
+        img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
+        img = img / 255.0
+        img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        new_images.append(img)
+    return torch.stack(new_images, dim=0)
+
+def load_image_batch(image_paths):
+    """
+    Preprocess the batch of images for the network
+    @param image_paths: paths for images
+    @return: batch of unprocessed images before augmentation
+    """
+    batch = []
+    for path in image_paths:
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        #img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
+        #img = img / 255.0
+        #img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        batch.append(img)
+    
+    return batch
 
 def resize_and_pad(image, size=(IMAGE_WIDTH, IMAGE_HEIGHT)):
     """
@@ -68,7 +95,7 @@ def ctc_decode(pred_ints : torch.Tensor, blank : int = 0) -> list:
             index = pred_ints[i, j].item()
             if index != blank and index != prev_int:
                 string += IDX_TO_CHAR[index]
-            prev_int = index
+                prev_int = index
         decoded_strs.append(string)
 
     return decoded_strs
@@ -85,8 +112,8 @@ def get_error_rates(predictions : list, targets : list) -> tuple:
     n = len(predictions)
 
     for x, y in zip(predictions, targets):
-        avg_wer += calculate_wer(x, y)
-        avg_cer += calculate_cer(x, y)
+        avg_wer += fastwer.score_sent(x, y)
+        avg_cer += fastwer.score_sent(x, y, char_level=True)
     avg_cer /= n
     avg_wer /= n
 
@@ -131,28 +158,3 @@ def levenstein_distance(str1 : str, str2 : str):
  
     # The final element in the last row contains the Levenshtein distance
     return curr_row[n]
-
-
-def calculate_wer(prediction : str, target : str) -> float:
-    """
-    Calculate the Word Error Rate between two strings
-    @param pred: list of predicted strings
-    @param target: list of target strings
-    @return: Word Error Rate (float)
-    """
-    pred_words = prediction.split()
-    target_words = target.split()
-    n = len(target_words)
-
-    hits = levenstein_distance(pred_words, target_words)
-    return hits / n
-
-def calculate_cer(predictions : str, targets : str) -> float:
-    """
-    Calculate the Character Error Rate between two strings
-    @param pred: predicted string
-    @param target: target string
-    @return: Character Error Rate
-    """
-    cer = levenstein_distance(predictions, targets) / len(targets)
-    return cer

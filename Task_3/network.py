@@ -8,13 +8,13 @@ class Recurrent_CNN(nn.Module):
                  num_classes: int,
 
                  Conv_Channels : int = 32, conv_kern : int = 7, conv_stride : int = 1, conv_padd : int = 3,
-                 Conv_dropout : float = 0.25,
+                 Conv_dropout : float = 0.0,
 
                  ResNet1_channels : int = 64, ResNet1_kern : int = 3, ResNet1_stride : int = 1, ResNet1_pad : int = 1,
                  ResNet2_channels : int = 128, ResNet2_kern : int = 3, ResNet2_stride : int = 1, ResNet2_pad : int = 1,
                  ResNet3_channels : int = 256, ResNet3_kern : int = 3, ResNet3_stride : int = 1, ResNet3_pad : int = 1,
 
-                 rnn_size : int = 256, rnn_dropout : float = 0.25
+                 rnn_size : int = 256, rnn_dropout : float = 0.2
                  ):
         """
         Initialize a RCNN model
@@ -95,52 +95,53 @@ class Recurrent_CNN(nn.Module):
             nn.BatchNorm2d(ResNet3_channels),
             nn.ReLU(),
             nn.Dropout(Conv_dropout)
-            # No max pooling at the end
+
+            # No max pooling at the end!
         )
-        #Max Pooling for each column
+       
         self.ColumnPooling_Module = nn.AdaptiveMaxPool2d((1, None))
 
+        # 1. Output Module: RNN branch
         self.Recurrent_Module = nn.Sequential(
             nn.LSTM(input_size = ResNet3_channels, 
                     hidden_size = rnn_size, 
                     num_layers = 3, batch_first = True, dropout = rnn_dropout, bidirectional = True)
         )
-
+        # 2. Output Module: CTC branch
         self.Output_Module = nn.Sequential(
             nn.Dropout(rnn_dropout),
-            nn.Linear(rnn_size * 2, num_classes)
+            nn.Linear(in_features = rnn_size * 2,out_features = num_classes)
         )
 
 
         self.CTC_Block = nn.Sequential(
-            nn.Conv1d(ResNet3_channels, num_classes, 3, 1, 1)
+            nn.Conv1d(in_channels = ResNet3_channels,out_channels = num_classes, kernel_size = 3,stride = 1, padding = 1)
         )
 
     
         return
 
-    def forward(self, image : torch.Tensor) -> torch.Tensor:
+    def forward(self, image : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the network
-        @param x: input tensor
-        @return: output tensor
+        @param x: input tensor of size (Batchsize, num_channels = 1, height = 128, width = 1024)
+        @return: output two tensor of shape (Batchsize, SeqLen = 128, NumClasses = 85 + 1) for RNN + CTC modules
         """
         x = self.Convolutional_Module(image)
         x = self.ResNet_Module_1(x)
         x = self.ResNet_Module_2(x)
-        x = self.ResNet_Module_3(x)
-        #(Batchsize, 256, 16, 128)
-        x = self.ColumnPooling_Module(x)
-        #(Batchsize, channels 256, height 1, width 128)
-
-        # Forward pass through RNN modules
+        x = self.ResNet_Module_3(x)         #(Batchsize, 256, 16, 128)
+        
+        x = self.ColumnPooling_Module(x)    #(Batchsize, channels 256, height 1, width 128)
+        
+        # Forward through RNN Module
         output_rnn, state_rnn = self.Recurrent_Module(x.permute(0, 2, 3, 1).squeeze(1))
         output_rnn = self.Output_Module(output_rnn)
 
-        # Forward output through ctc module
+        # Forward output through CTC module
         output_ctc = self.CTC_Block(x.squeeze(2))
 
-        return output_rnn, output_ctc.permute(0, 2, 1) # Returns both as (BatchSize, SeqLen, NumClasses)
+        return output_rnn, output_ctc.permute(0, 2, 1)
 
 
 
