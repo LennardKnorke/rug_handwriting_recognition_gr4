@@ -15,10 +15,10 @@ from network import *
 from utils import *
 
 # Makros only relevant for training
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 N_EPOCHS = 1_0
 N_FOLDS = 5
-TEST_RATIO = 0.5
+TEST_RATIO = 0.2
 
 def train_model(model : nn.Module, 
                 augmentation_model : nn.Module,
@@ -73,17 +73,19 @@ def train_model(model : nn.Module,
             """
             # Preprocess images
             images = preprocess_batch(images)
-            # Forward Pass
+            
             images = images.to(DEVICE)
-            pred_rnn, pred_ctc = model(images)
-            #shape = (BatchSize, SeqLen, NumClasses)
+            # Forward Pass
+            pred_rnn, pred_ctc = model(images)                         # shape = (BatchSize, SeqLen, NumClasses)
+            pred_int = pred_rnn.softmax(2).argmax(2)                    # Shape = (BatchSize, SeqLen), with integers for each pred char (0 = blank)
+
             # Convert to (SeqLen, BatchSize, NumClasses) for loss
-            pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
+            pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)         
             pred_ctc = pred_ctc.permute(1, 0, 2).log_softmax(2)
 
             inputLengths = torch.full(size = (images.size(0),), 
                                       fill_value = MAX_SEQ_LENGTH, 
-                                      dtype=torch.long)
+                                      dtype=torch.int32)
 
             # Compute Loss
             loss = loss_fn(pred_rnn.cpu(), targets_encoded, inputLengths, targets_length)            
@@ -95,8 +97,7 @@ def train_model(model : nn.Module,
             loss_train_ep += loss.item()
 
             # Compute accuracies
-            pred_int = pred_rnn.permute(1, 0, 2).argmax(2)
-            # Shape = (BatchSize, SeqLen)
+            
             decoded_strings = ctc_decode(pred_int)
 
             wer, cer = get_error_rates(decoded_strings, targets_strings)
@@ -134,7 +135,8 @@ def train_model(model : nn.Module,
                 
                 # Forward Pass
                 pred_rnn, pred_ctc = model(images)
-                #shape = (BatchSize, SeqLen, NumClasses)
+                pred_int = pred_rnn.softmax(2).argmax(2)            # Shape = (BatchSize, SeqLen), with integers for each pred char (0 = blank)
+
                 # Convert to (SeqLen, BatchSize, NumClasses) for loss
                 pred_rnn = pred_rnn.permute(1, 0, 2).log_softmax(2)
                 pred_ctc = pred_ctc.permute(1, 0, 2).log_softmax(2)
@@ -150,7 +152,7 @@ def train_model(model : nn.Module,
                 loss_test_ep += loss.item()
 
                 # Compute testing error rates
-                pred_int = pred_rnn.permute(1, 0, 2).argmax(2) # Shape = (BatchSize, SeqLen)
+                
                 decoded_strings = ctc_decode(pred_int)
                 wer, cer = get_error_rates(decoded_strings, targets_strings)
                 wer_test_ep += wer

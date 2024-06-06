@@ -65,10 +65,10 @@ class IAM_Dataset(Dataset):
         #img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
 
         # Convert target to encoded 128 long tensor
-        target_enc = torch.zeros(MAX_SEQ_LENGTH, dtype=torch.long) # IMPORTANT. DOUBLE CHECK IF PADDING IS SPACE BARS (1) OR BLANK (0)
+        target_enc = torch.zeros(MAX_SEQ_LENGTH, dtype=torch.long)
         for i, char in enumerate(self.labels[idx]):
             target_enc[i] = CHAR_TO_IDX[char]
         target_length = torch.tensor(len(self.labels[idx]), dtype = torch.long)
 
         # Return the preprocessed image, encoded target, the strings length and the original string
-        return img, (target_enc, target_length, img)
+        return img, (target_enc, target_length, self.labels[idx])

@@ -3,6 +3,31 @@ import torch.nn as nn
 import numpy as np
 
 
+class ResNetBlock(nn.Module):
+    """Implementation of a ResNet block."""
+
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResNetBlock, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False)
+        self.bnskip = nn.BatchNorm2d(out_channels)
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.bnskip(self.skip(x))
+        out = self.relu(out)
+        return out
+
+
 class Recurrent_CNN(nn.Module):
     def __init__(self,
                  num_classes: int,
@@ -34,68 +59,26 @@ class Recurrent_CNN(nn.Module):
 
         # First ResNet Block
         self.ResNet_Module_1 = nn.Sequential(
-            nn.Conv2d(Conv_Channels, ResNet1_channels, ResNet1_kern, ResNet1_stride, ResNet1_pad),
-            nn.BatchNorm2d(ResNet1_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet1_channels, ResNet1_channels, ResNet1_kern, ResNet1_stride, ResNet1_pad),
-            nn.BatchNorm2d(ResNet1_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            # Includes Max Pooling at the end
-            nn.MaxPool2d(2)
+            ResNetBlock(Conv_Channels, ResNet1_channels),
+            ResNetBlock(ResNet1_channels, ResNet1_channels),
+            nn.MaxPool2d(2),
         )
 
         # Second ResNet Block
         self.ResNet_Module_2 = nn.Sequential(
-            nn.Conv2d(ResNet1_channels, ResNet2_channels, ResNet2_kern, ResNet2_stride, ResNet2_pad),
-            nn.BatchNorm2d(ResNet2_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet2_channels, ResNet2_channels, ResNet2_kern, ResNet2_stride, ResNet2_pad),
-            nn.BatchNorm2d(ResNet2_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet2_channels, ResNet2_channels, ResNet2_kern, ResNet2_stride, ResNet2_pad),
-            nn.BatchNorm2d(ResNet2_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet2_channels, ResNet2_channels, ResNet2_kern, ResNet2_stride, ResNet2_pad),
-            nn.BatchNorm2d(ResNet2_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            # Includes Max Pooling at the end
-            nn.MaxPool2d(2)
+            ResNetBlock(ResNet1_channels, ResNet2_channels),
+            ResNetBlock(ResNet2_channels, ResNet2_channels),
+            ResNetBlock(ResNet2_channels, ResNet2_channels),
+            ResNetBlock(ResNet2_channels, ResNet2_channels),
+            nn.MaxPool2d(2),
         )
 
         # Third ResNet Block
         self.ResNet_Module_3 = nn.Sequential(
-            nn.Conv2d(ResNet2_channels, ResNet3_channels, ResNet3_kern, ResNet3_stride, ResNet3_pad),
-            nn.BatchNorm2d(ResNet3_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet3_channels, ResNet3_channels, ResNet3_kern, ResNet3_stride, ResNet3_pad),
-            nn.BatchNorm2d(ResNet3_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet3_channels, ResNet3_channels, ResNet3_kern, ResNet3_stride, ResNet3_pad),
-            nn.BatchNorm2d(ResNet3_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout),
-
-            nn.Conv2d(ResNet3_channels, ResNet3_channels, ResNet3_kern, ResNet3_stride, ResNet3_pad),
-            nn.BatchNorm2d(ResNet3_channels),
-            nn.ReLU(),
-            nn.Dropout(Conv_dropout)
-
+            ResNetBlock(ResNet2_channels, ResNet3_channels),
+            ResNetBlock(ResNet3_channels, ResNet3_channels),
+            ResNetBlock(ResNet3_channels, ResNet3_channels),
+            ResNetBlock(ResNet3_channels, ResNet3_channels),
             # No max pooling at the end!
         )
        
