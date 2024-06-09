@@ -85,23 +85,15 @@ class Recurrent_CNN(nn.Module):
         self.ColumnPooling_Module = nn.AdaptiveMaxPool2d((1, None))
 
         # 1. Output Module: RNN branch
-        self.Recurrent_Module = nn.Sequential(
-            nn.LSTM(input_size = ResNet3_channels, 
-                    hidden_size = rnn_size, 
-                    num_layers = 3, batch_first = True, dropout = rnn_dropout, bidirectional = True)
-        )
-        # 2. Output Module: CTC branch
+        self.Recurrent_Module = nn.LSTM(input_size = ResNet3_channels, hidden_size = rnn_size, num_layers = 3, batch_first = True, dropout = rnn_dropout, bidirectional = True)
         self.Output_Module = nn.Sequential(
             nn.Dropout(rnn_dropout),
             nn.Linear(in_features = rnn_size * 2,out_features = num_classes)
         )
 
+        # 2. Output Module: CTC branch
+        self.CTC_Block = nn.Conv1d(in_channels = ResNet3_channels,out_channels = num_classes, kernel_size = 3,stride = 1, padding = 1)
 
-        self.CTC_Block = nn.Sequential(
-            nn.Conv1d(in_channels = ResNet3_channels,out_channels = num_classes, kernel_size = 3,stride = 1, padding = 1)
-        )
-
-    
         return
 
     def forward(self, image : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

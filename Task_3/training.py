@@ -15,8 +15,8 @@ from network import *
 from utils import *
 
 # Makros only relevant for training
-BATCH_SIZE = 32
-N_EPOCHS = 1_0
+BATCH_SIZE = 16
+N_EPOCHS = 3
 N_FOLDS = 5
 TEST_RATIO = 0.2
 
@@ -30,7 +30,8 @@ def train_model(model : nn.Module,
                 training_loader : DataLoader,
                 testing_loader : DataLoader,
 
-                print_epochs : bool = False
+                print_epochs : bool = False,
+                augmentation : dict = {"type": None}
                 )-> Tuple[list, list, list, list, list, list]:
     """
     Train a model on a dataset and run validation with given optimization/scheduler
@@ -41,6 +42,7 @@ def train_model(model : nn.Module,
     @param scheduler: scheduler to use for training
     @return: 6 lists, 3 for training 3 for testing, each containing the loss, word error rate, and character error rate
     """
+    assert augmentation["type"] in [None, "simple", "RL", "both"], "Invalid augmentation type"
     train_loss = []
     train_wer = []
     train_cer = []
@@ -50,6 +52,10 @@ def train_model(model : nn.Module,
     test_cer = []
 
     model.to(DEVICE)
+
+    if augmentation["type"] == "RL" or augmentation["type"] == "both":
+        augmentation["model"].to(DEVICE)
+
     augmentation_model.to(DEVICE)
     
     for ep in tqdm(range(N_EPOCHS)):
@@ -60,23 +66,31 @@ def train_model(model : nn.Module,
 
         # Training Loop
         model.train()
+        if augmentation["type"] == "RL" or augmentation["type"] == "both":
+            augmentation["model"].train()
+
         for images, targets in training_loader:
             optimizer.zero_grad()
+            # Set up targets
+            targets_encoded, targets_length, targets_strings = targets      
             
-            
+            # Load (raw) greyscaled images
             images = load_image_batch(images)
-            targets_encoded, targets_length, targets_strings = targets
-
+            
             # Augmentation step
             """
-            augmentation_model.train()
+            if augmentation["type"] == "simple" or augmentation["type"] == "both":
+                images = simple_augmentation(images)
+            if augmentation["type"] == "RL" or augmentation["type"] == "both":
+                images = rl_augmentation(images, augmentation)
             """
-            # Preprocess images
+
+            # Resize and normalize images for the model
             images = preprocess_batch(images)
-            
             images = images.to(DEVICE)
+
             # Forward Pass
-            pred_rnn, pred_ctc = model(images)                         # shape = (BatchSize, SeqLen, NumClasses)
+            pred_rnn, pred_ctc = model(images)                          # shape = (BatchSize, SeqLen, NumClasses)
             pred_int = pred_rnn.softmax(2).argmax(2)                    # Shape = (BatchSize, SeqLen), with integers for each pred char (0 = blank)
 
             # Convert to (SeqLen, BatchSize, NumClasses) for loss
@@ -97,9 +111,7 @@ def train_model(model : nn.Module,
             loss_train_ep += loss.item()
 
             # Compute accuracies
-            
             decoded_strings = ctc_decode(pred_int)
-
             wer, cer = get_error_rates(decoded_strings, targets_strings)
             wer_train_ep += wer
             cer_train_ep += cer
@@ -128,8 +140,10 @@ def train_model(model : nn.Module,
         model.eval()
         with torch.no_grad():
             for images, targets in testing_loader:
-
+                # Set up targets
                 targets_encoded, targets_length, targets_strings = targets
+
+                # Preprocess batch (no augmentation in evaluation)
                 images = preprocess_batch(load_image_batch(images))
                 images = images.to(DEVICE)
                 
@@ -152,7 +166,6 @@ def train_model(model : nn.Module,
                 loss_test_ep += loss.item()
 
                 # Compute testing error rates
-                
                 decoded_strings = ctc_decode(pred_int)
                 wer, cer = get_error_rates(decoded_strings, targets_strings)
                 wer_test_ep += wer
@@ -186,7 +199,10 @@ if __name__ == "__main__":
     # Parameters to search for
     parameters = {
         "conv_dropout": [0.0, 0.1, 0.25],        # Might not be needed in case we figure our THEIR code
-        "augmentation_patches": [1, 2, 3],
+        "augment_dicts": [
+            {"type": "simple"},
+            {"tye" : None}
+        ]
     }
     paramList = list(itertools.product(*parameters.values()))
 
