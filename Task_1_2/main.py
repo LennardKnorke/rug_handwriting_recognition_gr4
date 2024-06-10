@@ -29,10 +29,10 @@ def parse_args() -> argparse.Namespace:
         '-a',
         '--augment',
         type=str,
-        choices=['elastic', 'straug'],
+        choices=['elastic', 'randaug'],
         nargs='*',
-        default=['straug'],
-        help='Augmentation method(s) to use while training the classifier: Elastic morphing and/or Scene Text Recognition Augmentation.'
+        default=['randaug'],
+        help='Augmentation method(s) to use while training the classifier: Elastic morphing and/or RandomAugment.'
     )
 
     parser.add_argument(
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         '-e',
         '--epochs',
         type=int,
-        default=12,
+        default=25,
         help='Number of epochs to train the classifier for.'
     )
 
@@ -82,19 +82,19 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         '-N',
-        '--n_straug',
+        '--n_randaug',
         type=int,
         default=3,
-        help='Number of augmentations to apply sequentially for StrAug.'
+        help='Number of augmentations to apply sequentially for RandomAugment.'
     )
 
     parser.add_argument(
         '-M',
-        '--m_straug',
+        '--m_randaug',
         type=int,
         default=1,
         choices=range(3),
-        help='Magnitude (0-2) of augmentations for StrAug.'
+        help='Magnitude (0-2) of augmentations for RandomAugment.'
     )
 
     parser.add_argument(
@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
 
     if "elastic" not in args.augment:
         args.patches, args.radius = None, None
-    if "straug" not in args.augment:
-        args.n_straug, args.m_straug = None, None
+    if "randaug" not in args.augment:
+        args.n_randaug, args.m_randaug = None, None
 
     if not os.path.exists(args.input_path):
         parser.error('The input folder does not exist.')
@@ -135,20 +135,18 @@ def run_DSS() -> None:
         create_test_split(args.test_split)
 
     # Train classifier
-    classifier_name = uniquify(get_model_save_name('recognizer', args.patches, args.radius, args.n_straug, args.m_straug), find=True)
+    classifier_name = uniquify(get_model_save_name('recognizer', args.patches, args.radius, args.n_randaug, args.m_randaug), find=True)
     if args.force_train or not os.path.exists(os.path.join("models", f"{classifier_name}.pth")):
-        # pretrain()
-
         train(args.epochs,
               args.batch_size,
               args.patches,
               args.radius,
-              args.n_straug,
-              args.m_straug,
+              args.n_randaug,
+              args.m_randaug,
               elastic="elastic" in args.augment,
               lta=args.lta,
               train_recog=True,
-              straug="straug" in args.augment,
+              randaug="randaug" in args.augment,
               split=args.test_split
               )
               

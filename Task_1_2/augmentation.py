@@ -3,18 +3,12 @@ from utils import *
 import cv2
 import torch
 import torch.nn.functional as F
+from tacobox import Taco
 # from molesq import ImageTransformer
 
 from PIL import Image
 
-from straug.blur import GaussianBlur, DefocusBlur, MotionBlur, GlassBlur, ZoomBlur
-from straug.camera import Contrast, Brightness, JpegCompression, Pixelate
-from straug.geometry import Rotate, Perspective, Shrink, TranslateX, TranslateY
-from straug.noise import GaussianNoise, ShotNoise, ImpulseNoise, SpeckleNoise
-from straug.pattern import VGrid, HGrid, Grid, RectGrid, EllipseGrid
-from straug.process import Posterize, Solarize, Invert, Equalize, AutoContrast, Sharpness, Color
-from straug.warp import Curve, Distort, Stretch
-from straug.weather import Fog, Snow, Frost, Rain, Shadow
+from ops import SaltNoise, Rotate, Shrink, Snow, Rain, RandomErasing, Erosion, Dilation, TilingAndCorruption
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # torch.autograd.set_detect_anomaly(True)
@@ -396,43 +390,36 @@ def elastic_demo(img_file, n_patches, radius):
         distort_img_list.append(distort_img)
     create_gif(distort_img_list, r'img/distort.gif')
 
-class Random_StrAug(object):
-    def __init__(self, using_aug_types, N, M):
+class RandomAug(object):
+    def __init__(self, N, M):
         self.N = N
         self.M = M
+        
         self.aug_list = []
-        if 'warp' in using_aug_types:
-            self.aug_list.extend([Curve(), Distort(), Stretch()]) 
-        if 'geometry' in using_aug_types:
-            self.aug_list.extend([Rotate(), Perspective(), Shrink(), TranslateX(), TranslateY()]) 
-        # if 'blur' in using_aug_types:
-        #     self.aug_list.append([GaussianBlur(), DefocusBlur(), MotionBlur(), GlassBlur(), ZoomBlur()]) 
-        if 'noise' in using_aug_types:
-            # self.aug_list.extend([GaussianNoise(), ShotNoise(), ImpulseNoise(), SpeckleNoise()]) 
-            self.aug_list.extend([GaussianNoise(), ImpulseNoise(), SpeckleNoise()]) 
-        if 'camera' in using_aug_types:
-            # self.aug_list.append([Contrast(), Brightness(), JpegCompression(), Pixelate()]) 
-            self.aug_list.extend([Pixelate()]) 
-        # if 'pattern' in using_aug_types:
-        #     self.aug_list.extend([VGrid(), HGrid(), Grid(), RectGrid(), EllipseGrid()]) 
-        # if 'process' in using_aug_types:
-        #     self.aug_list.append([Posterize(), Solarize(), Invert(), Equalize(), AutoContrast(), Sharpness(), Color()])
-        if 'weather' in using_aug_types:
-            # self.aug_list.append([Fog(), Snow(), Frost(), Rain(), Shadow()]) 
-            self.aug_list.extend([Snow(), Rain()]) 
-    
+        self.aug_list.extend([Rotate(), Shrink()])
+        self.aug_list.extend([SaltNoise()])
+        self.aug_list.extend([Snow(), Rain()])
+        self.aug_list.extend([RandomErasing()])
+        self.aug_list.extend([Erosion(), Dilation()])
+        self.aug_list.extend([TilingAndCorruption()]) 
+
         self.mag_range = np.random.randint(0, 3)
 
     def __call__(self, img):
         for _ in range(self.N):
-            # img = self.aug_list[i][np.random.randint(0, len(self.aug_list[i]))](img, mag = self.mag_range, prob = self.prob_list[i])
-            img = self.aug_list[np.random.randint(0, len(self.aug_list))](img, mag = self.M, prob = 1)
+            op = np.random.randint(0, len(self.aug_list))
+            if op <= 4 and not isinstance(img, Image.Image): 
+                img = Image.fromarray(img)
+            elif op > 4 and isinstance(img, Image.Image):
+                img = np.array(img)
+            img = self.aug_list[op](img, mag = self.M, prob = 1)
+            img = np.array(img)
 
         return img
     
-def straug_data(images, straug_sampler):
+def randaug_data(images, randaug_sampler):
     """
-    Augment images with StrAug.
+    Augment images with RandAugment.
     @param images: Images to augment
     @param agent: Augmentation agent.
     @return Augmented images
@@ -442,7 +429,7 @@ def straug_data(images, straug_sampler):
     images = images.detach().cpu().numpy()
     for i in range(len(images)):
         distort_img = Image.fromarray(images[i])
-        distort_img = straug_sampler(distort_img)
+        distort_img = randaug_sampler(distort_img)
         distort_img = np.array(distort_img)
         distort_img = cv2.cvtColor(distort_img, cv2.COLOR_RGB2BGR)
         distort_img = cv2.cvtColor(distort_img, cv2.COLOR_BGR2GRAY)
@@ -452,27 +439,47 @@ def straug_data(images, straug_sampler):
     aug_images = aug_images.reshape((len(images), 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))
     return aug_images
     
-def straug_demo(N, M):
-    groups = ['warp', 'geometry', 'noise', 'camera', 'pattern', 'weather']
-
-    # random_StrAug_1 = Random_StrAug(groups, prob_list = [0.5, 0.3, 0.2, 0.2, 0.1, 0.1])
-    random_StrAug_1 = Random_StrAug(groups, N, M)
+def randaug_demo(N, M):
+    randaug_1 = RandomAug(N, M)
     
-    pth = "img//straug"
+    pth = "img//randaug"
     img_file = "img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm"
     os.makedirs(pth, exist_ok=True)
 
-    img = cv2.imread(img_file,-1)
-    img = resize_and_pad(img)
-    img = Image.fromarray(img)
+    img = file_to_img(img_file)
     
-    augmented_img_1 = random_StrAug_1(img)
+    augmented_img_1 = randaug_1(img)
 
     # Save images to compare before and after augmentation.
     result = cv2.cvtColor(np.hstack((np.array(img), np.array(augmented_img_1))), cv2.COLOR_RGB2BGR)
     result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
     result = cv2.threshold(result, 120, 255, cv2.THRESH_BINARY)[1]
-    cv2.imwrite(os.path.join(pth, 'random_strAug.png'), result)
+    cv2.imwrite(os.path.join(pth, 'randaug.png'), result)
+
+def taco_demo(img, cp):
+    s = img.shape
+    max_w = img.shape[0]//3
+    max_h = max_w // (img.shape[0] // img.shape[1])
+    print(max_w,max_h)
+    mytaco = Taco(cp_vertical=cp,
+                cp_horizontal=cp,
+                max_tw_vertical=max_w,
+                min_tw_vertical=max_w//10,
+                max_tw_horizontal=max_h,
+                min_tw_horizontal=max_h//10
+                )
+    
+    distort_img_list = list()
+    for _ in range(100):
+        r = np.random.randint(3)
+        if r == 0: augmented_img = mytaco.apply_vertical_taco(img, corruption_type="white")
+        elif r == 1: augmented_img = mytaco.apply_horizontal_taco(img, corruption_type="white")
+        else: augmented_img = mytaco.apply_taco(img, corruption_type="white")
+        augmented_img = cv2.resize(augmented_img, (s[1],s[0]))  # Resize the image
+        distort_img_list.append(augmented_img)
+    create_gif(distort_img_list, r'img/distort.gif')
+
+    # mytaco.visualize(augmented_img)
 
 ##############################################
 #
@@ -481,6 +488,8 @@ if __name__ == '__main__':
     print("Running the augmentation script only")
     # elastic_demo("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm",
         #  2, 10)
-    straug_demo(3, 1)
 
-    
+    randaug_demo(3, 1)
+
+    # img = file_to_img("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm")
+    # taco_demo(img, 0.25)

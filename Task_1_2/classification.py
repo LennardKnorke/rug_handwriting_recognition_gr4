@@ -8,6 +8,7 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import os
 from joblib import load
+from tqdm import tqdm
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -123,7 +124,7 @@ def train_batch(images, labels, recognizer, recognizer_opt, aug_S2_batch, agent_
 
     return rec_loss, aug_loss
 
-def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=True, train_recog=True, straug_sampler=None, split=0):
+def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=True, train_recog=True, randaug_sampler=None, split=0):
     """
     Train an episode.
     @param images: All (non-augmented) train images
@@ -145,7 +146,7 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
     @param elastic: Whether the augmentation agent should be applied
     @param lta: Whether the agent should be trained. Otherwise, random augmentation is used.
     @param train_recog: Whether the recognizer should be trained
-    @param straug_sampler: USed to apply StrAug to image (None if not using StrAug)
+    @param randaug_sampler: USed to apply randaug to image (None if not using randaug)
     
     @return augmentation and recognizer losses, and accuracy for every batch
     """
@@ -153,7 +154,8 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0)
     loss, aug_loss, acc = 0.0, 0.0, 0.0
 
-    for images, labels in trainloader:
+    batch_progress = tqdm(trainloader, desc='Batches', leave=False)
+    for i, (images, labels) in enumerate(batch_progress):
         if elastic:
             if lta:
                 images, aug_S2, agent_outputs, S, S2 = augmentation.augment_data(images, n_patches, radius, agent=agent)
@@ -162,8 +164,8 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
                 images = augmentation.augment_data(images, n_patches, radius)
         if not lta: aug_S2, agent_outputs, S, S2 = None, None, None, None
 
-        if straug_sampler is not None:
-            images = augmentation.straug_data(images, straug_sampler)
+        if randaug_sampler is not None:
+            images = augmentation.randaug_data(images, randaug_sampler)
 
         images, labels = images.to(device), labels.to(device)
         batch_loss, batch_aug_loss = train_batch(images, labels, recognizer, recognizer_opt, aug_S2, agent_outputs, S, S2, agent_opt, lta=lta, train_recog=train_recog)
@@ -174,10 +176,11 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
         else: batch_acc = 0.0
 
         loss += batch_loss; aug_loss += batch_aug_loss; acc += batch_acc
+        batch_progress.set_postfix(loss=loss/(i+1), acc=acc/(i+1))
 
-    return loss, aug_loss, acc
+    return loss/len(trainloader), aug_loss/len(trainloader), acc/len(trainloader)
 
-def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, elastic=True, lta=False, train_recog=True, straug=True, split=0):
+def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, elastic=True, lta=False, train_recog=True, randaug=True, split=0):
     """
     Train augmentation agent and/or recognizer.
     @param n_patches: Number of patches used for augmentation.
@@ -187,7 +190,7 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
     @param elastic: Whether there should be elastic augmentation
     @param lta: Whether the augmentation agent should be trained (otherwise random augmentation)
     @param train_recog: Whether the recognizer should be trained (otherwise it is loaded)
-    @param straug: Whether the StrAug should be applied (using RandAugment policy)
+    @param randaug: Whether the randaug should be applied (using RandAugment policy)
     """
     org_images, labels = load_training_data(split)
     
@@ -210,10 +213,9 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
         os.makedirs(augment_path, exist_ok=True)
     else: agent, agent_opt = None, None
 
-    if straug:
-        groups = ['warp', 'geometry', 'noise', 'camera', 'weather']
-        straug_sampler = augmentation.Random_StrAug(groups, N, M)
-    else: straug_sampler = None
+    if randaug:
+        randaug_sampler = augmentation.RandomAug(N, M)
+    else: randaug_sampler = None
 
     if not split: classes, test_labels, testloader = None, None, None
 
@@ -229,9 +231,9 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
 
     losses, aug_losses, accs = [], [], []
 
-    for ep in range(n_epochs):
+    for ep in tqdm(range(n_epochs), desc='Epochs'):
         if elastic:
-            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=lta, train_recog=train_recog, straug_sampler=straug_sampler, split=split)
+            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=lta, train_recog=train_recog, randaug_sampler=randaug_sampler, split=split)
 
             if lta:
                 # save example augmented images from agent
@@ -245,10 +247,11 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
                     cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}.png"), example)
                     cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}_dist.png"), example_dist)
         else:
-            ep_loss, ep_aug_loss, ep_acc = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, straug_sampler=straug_sampler, split=split)
+            ep_loss, ep_aug_loss, ep_acc = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, randaug_sampler=randaug_sampler, split=split)
 
 
         losses.append(ep_loss); aug_losses.append(ep_aug_loss); accs.append(ep_acc)
+        print(f"\nEp {ep}. Train Loss: {ep_loss:.2f}. Test Accuracy: {ep_acc:.4f}.")
 
     if train_recog:
         save_name = save_model('recognizer', recognizer, recognizer_opt, n_patches, radius, N, M)
@@ -322,7 +325,7 @@ def main():
     batch_size = 64
     # n_patches, radius = None, None
     recognizer_name = uniquify(get_model_save_name('recognizer', n_patches, radius, N, M), find=True)
-    if not os.path.exists(os.path.join("models", f"{recognizer_name}.pth")): train(n_epochs, batch_size, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, straug=False, split=split)
+    if not os.path.exists(os.path.join("models", f"{recognizer_name}.pth")): train(n_epochs, batch_size, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, randaug=False, split=split)
 
     load_and_test(batch_size, recognizer_name, split)
 

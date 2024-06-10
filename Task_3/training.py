@@ -200,7 +200,7 @@ def train_model(model : nn.Module,
         test_cer.append(cer_test_ep / len(testing_loader))
 
         if print_epochs:
-            print(f"Ep {ep}. Train Loss: {train_loss[-1]}. Train WER: {train_wer[-1]}. Train CER: {train_cer[-1]}. Test Loss: {test_loss[-1]}. Test WER: {test_wer[-1]}. Test CER: {test_cer[-1]}")
+            print(f"\nEp {ep}. Train Loss: {train_loss[-1]}. Train WER: {train_wer[-1]}. Train CER: {train_cer[-1]}. Test Loss: {test_loss[-1]}. Test WER: {test_wer[-1]}. Test CER: {test_cer[-1]}")
 
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
         return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, train_aug_loss
