@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         '-e',
         '--epochs',
         type=int,
-        default=25,
+        default=12,
         help='Number of epochs to train the classifier for.'
     )
 

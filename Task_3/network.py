@@ -154,5 +154,5 @@ class AugmentAgentCNN(nn.Module):
         x = x.view(-1, 192)
         x = self.fc1(x)
         x = x.view(-1, self.n_points, 2, 2)
-        x = nn.functional.softmax(x,3)
+        # x = nn.functional.softmax(x,3)
         return x

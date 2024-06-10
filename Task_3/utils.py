@@ -3,6 +3,9 @@ import torch
 import torchvision
 import numpy as np
 import fastwer
+import imageio.v3 as iio
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 # MAKROS
 SEED : int = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,7 +43,7 @@ def load_image_batch(image_paths):
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
         #img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
         #img = img / 255.0
-        #img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+        # img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
         batch.append(img)
     
     return batch
@@ -158,3 +161,16 @@ def levenstein_distance(str1 : str, str2 : str):
  
     # The final element in the last row contains the Levenshtein distance
     return curr_row[n]
+
+def create_gif(image_list, gif_name, duration=0.1):
+    """
+    Create a gif from a list of images.
+    @param image_list: The list of images to use.
+    @param gif_name: The name of the gif file to save.
+    @param duration: The duration of each frame in the gif.
+    """
+    frames = []
+    for image in image_list:
+        frames.append(image)
+    iio.imwrite(gif_name, frames, duration=duration, loop=0)
+    return

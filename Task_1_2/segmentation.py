@@ -118,9 +118,10 @@ def segment_Image(image_path):
     lines = find_lines(char_boxes, img_height)
 
     # Show the image with detected characters and horizontal lines marked
-    # cv2.imshow('Segmented Characters with Lines', img)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3)) 
+    cv2.imshow('Segmented Characters with Lines', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     return lines
 
@@ -157,7 +158,8 @@ def main():
 
     This function processes a given image to extract and resize character images, then displays them one by one.
     """
-    path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
+    # path = "image-data/P22-Fg008-R-C01-R01-binarized.jpg"
+    path = "image-data/25-Fg001.pbm"
     char_images_resized = extract_and_resize_characters(path)
     print("Number of characters found:", sum(len(x) for x in char_images_resized))
 

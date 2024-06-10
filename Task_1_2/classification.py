@@ -56,14 +56,15 @@ def load_training_data(split=0):
     images = torch.Tensor(images); labels = torch.Tensor(labels)
     return images, labels
 
-def plot_final(losses, ylabel):
+def plot_final(losses, ylabel, ylim=None):
     """
     Simple plot, given variable ylabel.
     """
     plt.figure()
-    plt.xlabel('Batch')
+    plt.xlabel('Epoch')
     plt.ylabel(ylabel)
     plt.gca().yaxis.tick_right()
+    if ylim is not None: plt.gca().set_ylim(ylim)
     plt.plot(losses)
 
 def get_model_save_name(model_type, n_patches=None, radius=None, N=None, M=None):
@@ -122,7 +123,7 @@ def train_batch(images, labels, recognizer, recognizer_opt, aug_S2_batch, agent_
 
     return rec_loss, aug_loss
 
-def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=True, train_recog=True, straug_sampler=None, split=0):
+def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=True, train_recog=True, straug_sampler=None, split=0):
     """
     Train an episode.
     @param images: All (non-augmented) train images
@@ -150,7 +151,7 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
     """
     trainset = torch.utils.data.TensorDataset(images, labels)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0)
-    batch_losses, batch_aug_losses, batch_accs = [], [], []
+    loss, aug_loss, acc = 0.0, 0.0, 0.0
 
     for images, labels in trainloader:
         if elastic:
@@ -172,27 +173,9 @@ def train_epoch(images, batch_size, labels, recognizer, recognizer_opt, agent_op
             batch_acc = correct / total
         else: batch_acc = 0.0
 
-        plot_interactive(batch_aug_loss, batch_loss, batch_acc, aug_loss_line, rec_loss_line, acc_line, lta=lta, train_recog=train_recog)
-        batch_losses.append(batch_loss); batch_aug_losses.append(batch_aug_loss); batch_accs.append(batch_acc)
+        loss += batch_loss; aug_loss += batch_aug_loss; acc += batch_acc
 
-    return batch_losses, batch_aug_losses, batch_accs
-
-def init_interactive(lta, train_recog):
-    """
-    Initialize interactive plots
-    @return augmentation loss line, recognizer loss line, accuracy line
-    """
-    plt.ion()
-    aug_loss_line, rec_loss_line, acc_line = None, None, None
-    if lta:
-        plt.figure("aug", figsize=(5, 3))
-        aug_loss_line, = plt.plot([], [])
-    if train_recog:
-        plt.figure("rec", figsize=(5, 3))
-        rec_loss_line, = plt.plot([], [])
-        plt.figure("acc", figsize=(5, 3))
-        acc_line, = plt.plot([], [])
-    return aug_loss_line, rec_loss_line, acc_line
+    return loss, aug_loss, acc
 
 def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, elastic=True, lta=False, train_recog=True, straug=True, split=0):
     """
@@ -228,7 +211,7 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
     else: agent, agent_opt = None, None
 
     if straug:
-        groups = ['warp', 'geometry', 'noise', 'camera', 'pattern', 'weather']
+        groups = ['warp', 'geometry', 'noise', 'camera', 'weather']
         straug_sampler = augmentation.Random_StrAug(groups, N, M)
     else: straug_sampler = None
 
@@ -244,13 +227,11 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
         if split: classes, test_labels, testloader, recognizer = load_test_data(batch_size, split, uniquify(get_model_save_name('recognizer', n_patches=n_patches, radius=radius, N=N, M=M), find=True))
     recognizer = recognizer.to(device)
 
-    
-    aug_loss_line, rec_loss_line, acc_line = init_interactive(lta, train_recog)
     losses, aug_losses, accs = [], [], []
 
     for ep in range(n_epochs):
         if elastic:
-            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=lta, train_recog=train_recog, straug_sampler=straug_sampler, split=split)
+            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=True, lta=lta, train_recog=train_recog, straug_sampler=straug_sampler, split=split)
 
             if lta:
                 # save example augmented images from agent
@@ -264,10 +245,10 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
                     cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}.png"), example)
                     cv2.imwrite(os.path.join(augment_path, f"{i}_e{ep}_dist.png"), example_dist)
         else:
-            batch_losses, batch_aug_losses, batch_accs = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, aug_loss_line, rec_loss_line, acc_line, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, straug_sampler=straug_sampler, split=split)
+            ep_loss, ep_aug_loss, ep_acc = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, straug_sampler=straug_sampler, split=split)
 
 
-        losses.extend(batch_losses); aug_losses.extend(batch_aug_losses); accs.extend(batch_accs)
+        losses.append(ep_loss); aug_losses.append(ep_aug_loss); accs.append(ep_acc)
 
     if train_recog:
         save_name = save_model('recognizer', recognizer, recognizer_opt, n_patches, radius, N, M)
@@ -277,7 +258,7 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
         plt.savefig(f"{save_name}_acc.png")
     if lta:
         save_name = save_model('agent', agent, agent_opt, n_patches, radius, N, M)
-        plot_final(aug_losses, 'Agent Loss')
+        plot_final(aug_losses, 'Agent Loss', ylim=[0,1])
         plt.savefig(f"{save_name}_aug_loss.png")
     plt.ioff()
     plt.show()

@@ -413,8 +413,8 @@ class Random_StrAug(object):
         if 'camera' in using_aug_types:
             # self.aug_list.append([Contrast(), Brightness(), JpegCompression(), Pixelate()]) 
             self.aug_list.extend([Pixelate()]) 
-        if 'pattern' in using_aug_types:
-            self.aug_list.extend([VGrid(), HGrid(), Grid(), RectGrid(), EllipseGrid()]) 
+        # if 'pattern' in using_aug_types:
+        #     self.aug_list.extend([VGrid(), HGrid(), Grid(), RectGrid(), EllipseGrid()]) 
         # if 'process' in using_aug_types:
         #     self.aug_list.append([Posterize(), Solarize(), Invert(), Equalize(), AutoContrast(), Sharpness(), Color()])
         if 'weather' in using_aug_types:
@@ -481,6 +481,6 @@ if __name__ == '__main__':
     print("Running the augmentation script only")
     # elastic_demo("img//segmented//Alef//navis-QIrug-Qumran_extr09_0001-line-008-y1=400-y2=515-zone-HUMAN-x=1650-y=0049-w=0035-h=0042-ybas=0027-nink=631-segm=COCOS5cocos.pgm",
         #  2, 10)
-    straug_demo(3, 2)
+    straug_demo(3, 1)
 
     

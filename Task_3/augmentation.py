@@ -1,4 +1,7 @@
 import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import copy
 
 import torch
 import torch.nn.functional as F
@@ -233,26 +236,33 @@ def distort(src, n_patches, radius, movement, vertical=True, return_points=False
     if return_points: return dst, src_pts, dst_pts
     return dst, radii_copy
 
-def distort_batch(images, n_patches, radius, S, radii_list=None):
+def distort_batch(images, words, bboxes, n_patches, radius, S, radii_list=None):
     """
     Disort a batch of images with elastic morphing based on the moving state array S.
     """
-    images = torch.squeeze(images, 1)
-    aug_images = torch.empty_like(images).detach().cpu()
-    images = images.detach().cpu().numpy()
+    words = torch.squeeze(words, 1)
+    aug_images = copy.deepcopy(images)
+    words = words.detach().cpu().numpy()
     S_cpu = S.detach().cpu().numpy()
     new_radii_list = []
-    for i in range(len(images)):
+    for i in range(len(words)):
         if radii_list is None:
-            distort_img, new_radii = distort(images[i], n_patches, radius, S_cpu[i])
+            word, new_radii = distort(words[i], n_patches, radius, S_cpu[i])
             new_radii_list.append(new_radii)
         else:
-            distort_img, _ = distort(images[i], n_patches, radius, S_cpu[i], radii=radii_list[i])
-        aug_images[i] = torch.from_numpy(distort_img)
+            word, _ = distort(words[i], n_patches, radius, S_cpu[i], radii=radii_list[i])
 
-    aug_images = aug_images.reshape((len(images), 1, IMAGE_HEIGHT, IMAGE_WIDTH))
+        x, y, w, h = bboxes[i]
+        word = cv2.resize(word, (w, h))
+        distort_line = images[i].copy()
+        distort_line[y:y+h, x:x+w] = word
+        aug_images[i] = distort_line
+
+    # aug_words = aug_words.reshape((len(words), 1, IMAGE_HEIGHT, IMAGE_WIDTH))
     if new_radii_list: return aug_images, new_radii_list
     return aug_images
+
+
 
 def augment_data(images, n_patches, radius, agent=None):
     """
@@ -265,79 +275,75 @@ def augment_data(images, n_patches, radius, agent=None):
             outputs of the agent, moving state of the distortion, moving state of the random distortion.
             If agent is not provided, returns only randomly augmented images
     """
-    images = images.to(DEVICE)
+
+    segmented = [line_to_words(image) for image in images]
+    word_ids = [np.random.randint(len(x[0])) for x in segmented]
+    # word_ids = [1 for x in segmented]
+    words, bboxes = [x[0][word_ids[i]] for i,x in enumerate(segmented)], [x[1][word_ids[i]] for i,x in enumerate(segmented)]
+    words = np.array([cv2.resize(word, (100, 32)) for word in words])
+    words = torch.FloatTensor(words).reshape((len(images), 1, 32, 100))
+    words = words.to(DEVICE)
 
     if agent is not None:
-        agent_outputs = agent(images)
+        agent_outputs = agent(words)
         S = torch.max(agent_outputs, 3).indices
-
-        # sample instead of taking max
-        # S_flat = agent_outputs.view(-1, 2)
-        # indices = torch.multinomial(S_flat, 1)
-        # S = indices.view(agent_outputs.size(0), agent_outputs.size(1), agent_outputs.size(3))
 
         S2 = S.detach().clone().cpu()
         rev_points = np.random.randint(S.shape[1], size=S.shape[0])
-        rev_dirs = np.random.randint(2, size=S.shape[0])
+        # rev_points = np.random.randint(1, size=S.shape[0])
         mask = torch.zeros_like(S2, dtype=torch.bool)
-        mask[torch.arange(rev_points.shape[0]), rev_points, rev_dirs] = True
+        mask[torch.arange(rev_points.shape[0]), rev_points, :] = True
         S2 = torch.where(mask, 1 - S2, S2)
-        aug_S, radii = distort_batch(images, n_patches, radius, S.clone())
-        aug_S2 = distort_batch(images, n_patches, radius, S2.clone(), radii_list=radii)
+
+        aug_S, radii = distort_batch(images, words, bboxes, n_patches, radius, S.clone())
+        aug_S2 = distort_batch(images, words, bboxes, n_patches, radius, S2.clone(), radii_list=radii)
         return aug_S, aug_S2, agent_outputs, S, S2
     
     else:
         S = np.random.randint(2,size=images.shape[0]*2*(n_patches+1)*2).reshape((images.shape[0], 2*(n_patches+1), 2))
         S = torch.from_numpy(S)
-        aug_S, _ = distort_batch(images, n_patches, radius, S)
+
+        aug_S, _ = distort_batch(images, words, bboxes, n_patches, radius, S)
         return aug_S
 
-def learning_agent_loss(outputs, outputs_S2, labels, agent_outputs, S, S2):
+def learning_agent_loss(error, error_S2, agent_outputs, S, S2):
     S = S.to(DEVICE)
     S2 = S2.to(DEVICE)
-
-    # use "edit distance" 1 or 0
-    # recognizer_loss_S = torch.max(outputs, 1).indices != torch.max(labels, 1).indices
-    # recognizer_loss_S = recognizer_loss_S.int()
-    # recognizer_loss_S2 = torch.max(outputs_S2, 1).indices != torch.max(labels, 1).indices
-    # recognizer_loss_S2 = recognizer_loss_S2.int()
-
-    # use recognizer loss
-    recognizer_loss_S = F.cross_entropy(outputs, labels, reduction='none')
-    recognizer_loss_S2 = F.cross_entropy(outputs_S2, labels, reduction='none')
-
-    # true = S2.unsqueeze(-1).expand(-1,-1,-1,2)
-    # mask2 = torch.arange(2).expand_as(true)
-    # true = torch.where(true==mask2, 1, 0)
-    # true = true.view(agent_outputs.size(0),-1)
- 
-    # mask = recognizer_loss_S <= recognizer_loss_S2
-    # mask = mask.unsqueeze(-1).unsqueeze(-1).expand_as(S2)
-    # mask = mask & torch.max(agent_outputs,3).indices != S2
-    # S2 = torch.where(mask, 1 - S2, S2)
-    # S2 = S2.view(-1)
-    # agent_outputs = agent_outputs.view(-1, 2)
-    # loss = F.nll_loss(torch.log(agent_outputs + 1e-20), S2)
- 
-    # print(agent_outputs[0][0].tolist())
-    # if (S[0][0][0] != 0 or S[0][0][1] != 0) and S2[0][0][0] == 0 and S2[0][0][1] == 0:
-    #     print(S[0][0].tolist(), S2[0][0].tolist())
-    #     print("S", round(float(recognizer_loss_S.float().mean()), 3))
-    #     print("S2", round(float(recognizer_loss_S2.float().mean()), 3))
     rev_mask = S != S2
-    rev = rev_mask.any(-1).max(-1).indices
-    S_rev = S[torch.arange(rev.size(0)), rev]
-    S2_rev = S2[torch.arange(rev.size(0)), rev]
-    agent_outputs = agent_outputs[torch.arange(rev.size(0)), rev]
-    mask = recognizer_loss_S <= recognizer_loss_S2
-    mask = mask.unsqueeze(-1).expand_as(S2_rev)
-    true = torch.where(mask, S2_rev, S_rev)
-    true = true.view(-1)
-    agent_outputs = agent_outputs.view(-1, 2)
-    loss = F.nll_loss(torch.log(agent_outputs + 1e-20), true)
+    agent_outputs = F.softmax(agent_outputs,3)
+
+    # rev = rev_mask.any(-1).max(-1).indices
+    # S_rev = S[torch.arange(rev.size(0)), rev]
+    # S2_rev = S2[torch.arange(rev.size(0)), rev]
+    # agent_outputs_small = agent_outputs[torch.arange(rev.size(0)), rev]
+    # mask = error < error_S2
+    # mask = mask.unsqueeze(-1).expand_as(S2_rev).to(DEVICE)
+    # true = torch.where(mask, S2_rev, S_rev)
+    # true = true.view(-1)
+    # agent_outputs_small = agent_outputs_small.view(-1, 2)
+    # loss = F.nll_loss(torch.log(agent_outputs_small + 1e-20), true)
+
+    S2_probs = torch.where(rev_mask, agent_outputs.min(-1).values, agent_outputs.max(-1).values)
+    S2_rev_probs = 1 - S2_probs
+    S2_probs = S2_probs.prod(-1)
+    S2_rev_probs = S2_rev_probs.prod(-1)
+    mask = error < error_S2
+    mask = mask.unsqueeze(-1).expand_as(S2_probs).to(DEVICE)
+    P = torch.where(mask, S2_probs, S2_rev_probs)
+    loss = P.log().sum(-1) * -1
+    loss = loss.mean()
+    
+    # if S2[0][0][0] == 0 and S2[0][0][1] == 0 and (S[0][0][0] != 0 or S[0][0][1] != 0):
+    #     print(f"S2 Harder - S error {error[0]:.2f}, S2 error {error_S2[0]:.2f}, S {S[0][0].tolist()}, S2 {S2[0][0].tolist()}, loss {loss:.2f}, A1 {agent_outputs[0][0][0][0]:.2f}, A2 {agent_outputs[0][0][1][0]:.2f}")
+    # elif S[0][0][0] == 0 and S[0][0][1] == 0 and (S2[0][0][0] != 0 or S2[0][0][1] != 0):
+    #     print(f"S2 Easier - S error {error[0]:.2f}, S2 error {error_S2[0]:.2f}, S {S[0][0].tolist()}, S2 {S2[0][0].tolist()}, loss {loss:.2f}, A1 {agent_outputs[0][0][0][0]:.2f}, A2 {agent_outputs[0][0][1][0]:.2f}")
+    # else:
+    #     print(f"S {S[0][0].tolist()}, S2 {S2[0][0].tolist()}")
+    #     print(f"S2 Similar - S {S[0][0].tolist()}, S2 {S2[0][0].tolist()}, loss {loss[0].item():.2f}, A1 {agent_outputs[0][0][0][0]:.2f}, A2 {agent_outputs[0][0][1][0]:.2f}")
+    
     return loss
 
-def train(outputs, outputs_S2, labels, agent_opt, agent_outputs, S, S2):
+def train(error, error_S2, agent_opt, agent_outputs, S, S2):
     """
     Train the learning augmentation agent.
     @param outputs: Outputs of the recognizer on the augmented images
@@ -350,10 +356,96 @@ def train(outputs, outputs_S2, labels, agent_opt, agent_outputs, S, S2):
     @return Learning agent loss.
     """
     criterion = learning_agent_loss
-    loss = criterion(outputs, outputs_S2, labels, agent_outputs, S, S2)
+    loss = criterion(error, error_S2, agent_outputs, S, S2)
     if not torch.isnan(loss):
         agent_opt.zero_grad()
         loss.backward()
         agent_opt.step()
         return loss.item()
     return 0.0
+
+def line_to_words(image):
+    _, binary = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # Dilation to connect letters within a word
+    kernel = np.ones((20, 20), np.uint8)
+    binary = cv2.dilate(binary, kernel, iterations=1)
+
+    # Apply morphology to connect components
+    kernel = np.ones((5, 5), np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    # Find contours
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Filter out small bounding boxes
+    min_width, min_height = 10, 10 # To be considered a word
+    contours = [cnt for cnt in contours if cv2.boundingRect(cnt)[2] > min_width and cv2.boundingRect(cnt)[3] > min_height]
+
+    # Show contours
+    # image_with_contours = image.copy()
+    # cv2.drawContours(image_with_contours, contours, -1, (0, 255, 0), 2)
+    # plt.figure(figsize=(5, 5))
+    # plt.imshow(cv2.cvtColor(image_with_contours, cv2.COLOR_BGR2RGB))
+    # plt.title('Contours')
+    # plt.axis('off')
+
+    # Show bounding rectangles
+    # image_with_rectangles = image.copy()
+    # for cnt in contours:
+    #     x, y, w, h = cv2.boundingRect(cnt)
+    #     cv2.rectangle(image_with_rectangles, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    # plt.figure(figsize=(5, 5))
+    # plt.imshow(cv2.cvtColor(image_with_rectangles, cv2.COLOR_BGR2RGB))
+    # plt.title('Bounding Rectangles')
+    # plt.axis('off')
+
+    # Sort from left to right
+    bounding_boxes = [cv2.boundingRect(cnt) for cnt in contours]
+    bounding_boxes = sorted(bounding_boxes, key=lambda b: b[0])  # Sort by x-coordinate
+
+    # Extract words
+    word_images = []
+    for bbox in bounding_boxes:
+        x, y, w, h = bbox
+        word_image = image[y:y+h, x:x+w]
+        word_images.append(word_image)
+
+    # Show word images
+    # plt.figure(figsize=(5, 5))
+    # for i, word_image in enumerate(word_images):
+    #     plt.subplot(1, len(word_images), i + 1)
+    #     plt.imshow(cv2.cvtColor(word_image, cv2.COLOR_BGR2RGB))
+    #     plt.axis('off')
+    # plt.show()
+
+    return word_images, bounding_boxes
+
+def augment_line_demo(line):
+    word_images, bounding_boxes = line_to_words(line)
+
+    n_patches, radius = 3, 10
+    distort_line_list = list()
+    for _ in range(100):
+        distort_line = line.copy()
+
+        for word, bbox in zip(word_images, bounding_boxes):
+            S = np.random.randint(2,size=2*(n_patches+1)*2).reshape((2*(n_patches+1), 2))
+            word = cv2.resize(word, (100, 32))
+            word, _ = distort(word, n_patches, radius, S)
+            x, y, w, h = bbox
+            word = cv2.resize(word, (w, h))
+            distort_line[y:y+h, x:x+w] = word
+
+        distort_line_list.append(distort_line)
+
+    create_gif(distort_line_list, r'distort.gif')
+
+
+if __name__ == '__main__':
+    # line = cv2.imread('img//a01-000u-04.png')
+    # line = cv2.cvtColor(line, cv2.COLOR_BGR2GRAY)
+
+    line = cv2.imread('img//a01-000u-00.png', cv2.IMREAD_GRAYSCALE)
+    augment_line_demo(line)

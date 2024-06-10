@@ -9,23 +9,20 @@ from tqdm import tqdm
 from typing import Tuple
 
 # Our modules
-from augmentation import *
+import augmentation as augment
 from dataset import *
 from network import *
 from utils import *
 
 # Makros only relevant for training
-BATCH_SIZE = 16
-N_EPOCHS = 3
+BATCH_SIZE = 8
+N_EPOCHS = 10
 N_FOLDS = 5
 TEST_RATIO = 0.2
 
 def train_model(model : nn.Module, 
-                augmentation_model : nn.Module,
-
                 optimizer : optim,
                 scheduler : optim.lr_scheduler,
-                augmentation_optimizer : optim, 
 
                 training_loader : DataLoader,
                 testing_loader : DataLoader,
@@ -46,6 +43,7 @@ def train_model(model : nn.Module,
     train_loss = []
     train_wer = []
     train_cer = []
+    train_aug_loss = []
 
     test_loss = []
     test_wer = []
@@ -55,13 +53,13 @@ def train_model(model : nn.Module,
 
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
         augmentation["model"].to(DEVICE)
-
-    augmentation_model.to(DEVICE)
     
-    for ep in tqdm(range(N_EPOCHS)):
+    for ep in tqdm(range(N_EPOCHS), desc='Epochs'):
         loss_train_ep = 0.0
         wer_train_ep = 0.0
         cer_train_ep = 0.0
+        if augmentation["type"] == "RL" or augmentation["type"] == "both":
+            aug_loss_ep = 0.0
         loss_fn = nn.CTCLoss(zero_infinity = True)
 
         # Training Loop
@@ -69,7 +67,8 @@ def train_model(model : nn.Module,
         if augmentation["type"] == "RL" or augmentation["type"] == "both":
             augmentation["model"].train()
 
-        for images, targets in training_loader:
+        batch_progress = tqdm(train_loader, desc='Batches', leave=False)
+        for i, (images, targets) in enumerate(batch_progress):
             optimizer.zero_grad()
             # Set up targets
             targets_encoded, targets_length, targets_strings = targets      
@@ -78,12 +77,13 @@ def train_model(model : nn.Module,
             images = load_image_batch(images)
             
             # Augmentation step
-            """
             if augmentation["type"] == "simple" or augmentation["type"] == "both":
-                images = simple_augmentation(images)
+                pass
+                # images = simple_augmentation(images)
             if augmentation["type"] == "RL" or augmentation["type"] == "both":
-                images = rl_augmentation(images, augmentation)
-            """
+                images, aug_S2, agent_outputs, S, S2 = augment.augment_data(images, augmentation["n_patches"], augmentation["radius"], agent=augmentation["model"])
+                aug_S2 = preprocess_batch(aug_S2)
+                aug_S2 = aug_S2.to(DEVICE)
 
             # Resize and normalize images for the model
             images = preprocess_batch(images)
@@ -112,25 +112,48 @@ def train_model(model : nn.Module,
 
             # Compute accuracies
             decoded_strings = ctc_decode(pred_int)
+
             wer, cer = get_error_rates(decoded_strings, targets_strings)
             wer_train_ep += wer
             cer_train_ep += cer
 
             # Augmentation Training step
-            """
-            outputs_S2 = model(aug_S2)
-            train(outputs = pred_rnn,
-                  outputs_S2 = outputs_S2,
-                  labels = targets_encoded,
-                  agent_opt = augmentation_optimizer,
-                  agent_outputs = agent_outputs,
-                  S = S,
-                  S2 = S2)
-            """
+            if augmentation["type"] == "RL" or augmentation["type"] == "both":
+                pred_rnn_S2, _ = model(aug_S2)
+                pred_int_S2 = pred_rnn_S2.softmax(2).argmax(2)
+                pred_rnn_S2 = pred_rnn_S2.permute(1, 0, 2).log_softmax(2)
+                decoded_strings_S2 = ctc_decode(pred_int_S2)
 
-        train_loss.append(loss_train_ep)
+                # print(decoded_strings[i], "-----", decoded_strings_S2[i])
+
+                error = torch.FloatTensor(np.array([fastwer.score_sent(decoded_strings[i], targets_strings[i], char_level=True) for i in range(len(targets_strings))]))
+                error_S2 = torch.FloatTensor(np.array([fastwer.score_sent(decoded_strings_S2[i], targets_strings[i], char_level=True) for i in range(len(targets_strings))]))
+
+                aug_loss = augment.train(error = error,
+                    error_S2 = error_S2,
+                    agent_opt = augmentation["opt"],
+                    agent_outputs = agent_outputs,
+                    S = S,
+                    S2 = S2)
+                
+                # plt.figure(figsize=(15, 5))
+                # plt.subplot(1, 2, 1)
+                # plt.imshow(images[0][0].cpu())
+                # plt.axis('off')
+                # plt.subplot(1, 2, 2)
+                # plt.imshow(aug_S2[0][0].cpu())
+                # plt.axis('off')
+                # plt.show()
+            
+                aug_loss_ep += aug_loss
+
+            batch_progress.set_postfix(loss=loss_train_ep/(i+1), wer=wer_train_ep/(i+1), cer=cer_train_ep/(i+1))
+
+        train_loss.append(loss_train_ep / len(training_loader))
         train_wer.append(wer_train_ep / len(training_loader))
         train_cer.append(cer_train_ep / len(training_loader))
+        if augmentation["type"] == "RL" or augmentation["type"] == "both":
+            train_aug_loss.append(aug_loss_ep / len(training_loader))
 
         
         # Testing Loop
@@ -172,13 +195,15 @@ def train_model(model : nn.Module,
                 cer_test_ep += cer
         # End of Epoch
         scheduler.step()
-        test_loss.append(loss_test_ep)
-        test_wer.append(wer_test_ep/ len(testing_loader))
+        test_loss.append(loss_test_ep / len(testing_loader))
+        test_wer.append(wer_test_ep / len(testing_loader))
         test_cer.append(cer_test_ep / len(testing_loader))
 
         if print_epochs:
             print(f"Ep {ep}. Train Loss: {train_loss[-1]}. Train WER: {train_wer[-1]}. Train CER: {train_cer[-1]}. Test Loss: {test_loss[-1]}. Test WER: {test_wer[-1]}. Test CER: {test_cer[-1]}")
 
+    if augmentation["type"] == "RL" or augmentation["type"] == "both":
+        return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, train_aug_loss
     return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer
 
 # Training script to train the Recurrent_CNN model for task 2. outputs the model to a file as well as results
@@ -207,7 +232,7 @@ if __name__ == "__main__":
     paramList = list(itertools.product(*parameters.values()))
 
     best_loss = 1000000
-    best_params = [0.0, 2]
+    best_params = [0.0, 2, 10]
     """
     # Train different models for multiple folds
     for params in paramList:
@@ -252,10 +277,12 @@ if __name__ == "__main__":
     # Save the performance and model at the end
     ##########################################################################################################
     print("Best model found with parameters: ", best_params)
-    conv_dropout, n_patches = best_params
+    conv_dropout, n_patches, radius = best_params
     model = Recurrent_CNN(N_CHARS + 1,
                           Conv_dropout = conv_dropout
                           )
+    
+    # model.load_state_dict(torch.load("./Task_3/IAM_the_best_model.pth"))
     
     optimizer = optim.Adam(model.parameters(), lr = 0.001)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones = [120, 180], gamma = 0.1)
@@ -267,17 +294,22 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_data, batch_size = BATCH_SIZE, shuffle = True)
     test_loader = DataLoader(test_data, batch_size = BATCH_SIZE, shuffle = False)
 
-    train_loss, test_loss, train_wer, test_wer, train_cer, test_cer = train_model(model = model,
-                                                                                  augmentation_model = aug_model,
+    augmentation = {'model': aug_model, 'type': 'RL', 'opt': aug_optimizer, 'n_patches': n_patches, 'radius': radius}
+
+    train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, aug_loss = train_model(model = model,
                                                                                   training_loader = train_loader,
                                                                                   testing_loader = test_loader,
                                                                                   optimizer = optimizer,
                                                                                   scheduler = scheduler,
-                                                                                  augmentation_optimizer = aug_optimizer,
-                                                                                  print_epochs = True)
+                                                                                  print_epochs = True,
+                                                                                  augmentation = augmentation)
     print(f"Final Results: \nTest Loss:{test_loss[-1]} \nTest Word Error Rate: {test_wer[-1]}\nTest Character Error Rate: {test_cer[-1]}")
     # Save the model
     torch.save(model.state_dict(), "./Task_3/IAM_the_best_model.pth")
+    torch.save(optimizer.state_dict(), "./Task_3/IAM_the_best_model_optim.pth")
+    if augmentation["type"] == "RL" or augmentation["type"] == "both":
+        torch.save(aug_model.state_dict(), "./Task_3/IAM_the_best_aug.pth")
+        torch.save(aug_optimizer.state_dict(), "./Task_3/IAM_the_best_aug_optim.pth")
     
     # Plot performance
     plt.figure()
@@ -307,4 +339,13 @@ if __name__ == "__main__":
     plt.title("Word Error Rate")
     plt.savefig("./Task_3/wer_plot.png")
     plt.close()
+
+    if augmentation["type"] == "RL" or augmentation["type"] == "both":
+        plt.figure()
+        plt.plot(aug_loss)
+        plt.xlabel("Epoch")
+        plt.legend()
+        plt.title("Augmentation agent loss")
+        plt.savefig("./Task_3/aug_loss_plot.png")
+        plt.close()
     # Done

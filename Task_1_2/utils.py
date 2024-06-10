@@ -270,3 +270,22 @@ def hebrewize(roman):
          'Zayin': 'ז'
     }
     return d[roman]
+
+
+
+def init_interactive(lta, train_recog):
+    """
+    Initialize interactive plots
+    @return augmentation loss line, recognizer loss line, accuracy line
+    """
+    plt.ion()
+    aug_loss_line, rec_loss_line, acc_line = None, None, None
+    if lta:
+        plt.figure("aug", figsize=(5, 3))
+        aug_loss_line, = plt.plot([], [])
+    if train_recog:
+        plt.figure("rec", figsize=(5, 3))
+        rec_loss_line, = plt.plot([], [])
+        plt.figure("acc", figsize=(5, 3))
+        acc_line, = plt.plot([], [])
+    return aug_loss_line, rec_loss_line, acc_line
