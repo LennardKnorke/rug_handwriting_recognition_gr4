@@ -15,9 +15,58 @@ import cv2
 import numpy as np
 from utils import *
 
+def find_lines_v2(char_boxes, img_height):
+    # TTLA-c
+    # Sort character boxes by the x coordinate in descending order for RTL languages
+    char_boxes = sorted(char_boxes, key=lambda x: x[0], reverse=True)
+
+    lines = []
+    vertical_extension = img_height // 22
+    remaining_boxes = []
+
+    while char_boxes:
+        rightmost_box = char_boxes[0]
+        current_line = []
+
+        mid_of_box = rightmost_box[1] + rightmost_box[3] // 2
+        line_bottom = mid_of_box - vertical_extension
+        line_top = mid_of_box + vertical_extension
+
+        next_box = find_neighbour_box(char_boxes, mid_of_box, line_top, line_bottom)
+        while next_box:
+            current_line.append(next_box)
+            char_boxes.remove(next_box)
+            mid_of_box = next_box[1] + next_box[3] // 2
+            line_bottom = mid_of_box - vertical_extension
+            line_top = mid_of_box + vertical_extension
+            next_box = find_neighbour_box(char_boxes, mid_of_box, line_top, line_bottom)
+
+
+        lines.append(current_line)
+
+    # remove lines with less than 3 characters
+    lines = [line for line in lines if len(line) >= 3]
+
+    # sort lines based on the y-coordinate of the first box in the line
+    lines = sorted(lines, key=lambda line: line[0][1] if line else float('inf'))
+
+    print("Number of lines found:", len(lines))
+
+    return lines
+
+
+def find_neighbour_box(boxes, mid, line_top, line_bottom):
+    for box in boxes:
+        found_box_mid = box[1] + box[3] // 2
+        if line_bottom <= found_box_mid <= line_top:
+            return box
+    return None
+
+
 
 def find_lines(char_boxes, img_height):
     """
+    TTLA
     Organizes character bounding boxes into lines based on their vertical positions.
 
     This function sorts character bounding boxes from right to left, then groups them into lines
@@ -115,7 +164,7 @@ def segment_Image(image_path):
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
     # Find lines
-    lines = find_lines(char_boxes, img_height)
+    lines = find_lines_v2(char_boxes, img_height)
 
     # Show the image with detected characters and horizontal lines marked
     img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3)) 
@@ -159,7 +208,8 @@ def main():
     This function processes a given image to extract and resize character images, then displays them one by one.
     """
     # path = "image-data/P22-Fg008-R-C01-R01-binarized.jpg"
-    path = "image-data/25-Fg001.pbm"
+    # path = "image-data/25-Fg001.pbm"
+    path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
     char_images_resized = extract_and_resize_characters(path)
     print("Number of characters found:", sum(len(x) for x in char_images_resized))
 
