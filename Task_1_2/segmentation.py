@@ -122,7 +122,10 @@ def find_lines(char_boxes, img_height):
 
     return lines
 
-
+def show_img(img, title='img'):
+    cv2.imshow(title, img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 def segment_Image(image_path):
     """
     Segments an image into lines of character bounding boxes.
@@ -144,10 +147,26 @@ def segment_Image(image_path):
     # Get the height of the image
     img_height = img.shape[0]
 
-    # Apply adaptive threshold to ensure the image is binary
-    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    # show_img(img, 'original')
 
-    # Find contours on the dilated image
+    _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
+    # show_img(img, 'threshold')
+
+    # Apply adaptive threshold to ensure the image is binary
+    # img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    # show_img(img, 'adaptiveThreshold')
+
+
+    # Apply dilation followed by erosion to close small holes and gaps in the characters
+    # kernel = np.ones((5,5), np.uint8)
+    # img = cv2.dilate(img, kernel, iterations=1)
+    # # show img
+    # show_img(img, 'dilated')
+    # img = cv2.erode(img, kernel, iterations=2)
+    # # show img
+    # show_img(img, 'eroded')
+
+    # Find contours
     contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     char_images = []
@@ -164,7 +183,7 @@ def segment_Image(image_path):
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
     # Find lines
-    lines = find_lines_v2(char_boxes, img_height)
+    lines = find_lines(char_boxes, img_height)
 
     # Show the image with detected characters and horizontal lines marked
     img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3)) 
@@ -209,7 +228,8 @@ def main():
     """
     # path = "image-data/P22-Fg008-R-C01-R01-binarized.jpg"
     # path = "image-data/25-Fg001.pbm"
-    path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
+    # path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
+    path = "image-data/P632-Fg001-R-C01-R01-binarized.jpg"
     char_images_resized = extract_and_resize_characters(path)
     print("Number of characters found:", sum(len(x) for x in char_images_resized))
 
