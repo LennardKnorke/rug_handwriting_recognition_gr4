@@ -21,7 +21,7 @@ def find_lines_v2(char_boxes, img_height):
     char_boxes = sorted(char_boxes, key=lambda x: x[0], reverse=True)
 
     lines = []
-    vertical_extension = img_height // 22
+    vertical_extension = img_height // 50
     remaining_boxes = []
 
     while char_boxes:
@@ -174,7 +174,7 @@ def segment_Image(image_path):
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
 
-        if 30 < h < 200 and 10 < w < 100:
+        if 30 < h < 200 and 20 < w < 130:
             char_img = img[y:y + h, x:x + w]
             char_boxes.append((x, y, w, h))
 
@@ -183,10 +183,10 @@ def segment_Image(image_path):
             cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
     # Find lines
-    lines = find_lines(char_boxes, img_height)
+    lines = find_lines_v2(char_boxes, img_height)
 
     # Show the image with detected characters and horizontal lines marked
-    img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3)) 
+    img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3))
     cv2.imshow('Segmented Characters with Lines', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
@@ -229,7 +229,8 @@ def main():
     # path = "image-data/P22-Fg008-R-C01-R01-binarized.jpg"
     # path = "image-data/25-Fg001.pbm"
     # path = "image-data/P123-Fg001-R-C01-R01-binarized.jpg"
-    path = "image-data/P632-Fg001-R-C01-R01-binarized.jpg"
+    # path = "image-data/P632-Fg001-R-C01-R01-binarized.jpg"
+    path = "image-data/P564-Fg003-R-C01-R01-binarized.jpg"
     char_images_resized = extract_and_resize_characters(path)
     print("Number of characters found:", sum(len(x) for x in char_images_resized))
 
