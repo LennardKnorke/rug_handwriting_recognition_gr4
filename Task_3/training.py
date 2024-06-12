@@ -16,7 +16,7 @@ from utils import *
 
 # Makros only relevant for training
 BATCH_SIZE = 8
-N_EPOCHS = 10
+N_EPOCHS = 240
 N_FOLDS = 5
 TEST_RATIO = 0.2
 
@@ -204,7 +204,7 @@ def train_model(model : nn.Module,
 
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
         return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, train_aug_loss
-    return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer
+    return train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, 0.0
 
 # Training script to train the Recurrent_CNN model for task 2. outputs the model to a file as well as results
 if __name__ == "__main__":
