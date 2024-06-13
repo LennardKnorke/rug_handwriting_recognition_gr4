@@ -17,7 +17,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 ##############################################
 def load_classifier(model_name):
     classifier = networks.ClassifierCNN(CHARACTER_HEIGHT).to(device)
-    classifier.load_state_dict(torch.load(os.path.join("models", f"{model_name}.pth")))
+    classifier.load_state_dict(torch.load(f"{model_name}.pth"))
     return classifier
 
 

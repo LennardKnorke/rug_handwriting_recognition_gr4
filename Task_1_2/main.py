@@ -12,16 +12,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="")
 
     parser.add_argument(
-        '--input_path',
+        'input_path',
         type=str,
-        default=os.path.join("img", "test"),
         help='Path to the folder containing the test images.'
     )
 
     parser.add_argument(
         '--output_path',
         type=str,
-        default="test_evaluation",
+        default="results",
         help='Path to the folder where the output txt files should be placed.'
     )
 
@@ -106,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         help='Percentage of test pre-segmented characters. Set to 0 to disable.'
     )
 
+    parser.add_argument(
+        '--save-segmentation',
+        action=argparse.BooleanOptionalAction,
+        help='Save segmented images.'
+    )
+
     args = parser.parse_args()
 
     if args.lta and "elastic" not in args.augment:
@@ -136,7 +141,7 @@ def run_DSS() -> None:
 
     # Train classifier
     classifier_name = uniquify(get_model_save_name('recognizer', args.patches, args.radius, args.n_randaug, args.m_randaug), find=True)
-    if args.force_train or not os.path.exists(os.path.join("models", f"{classifier_name}.pth")):
+    if args.force_train or not os.path.exists(f"{classifier_name}.pth"):
         train(args.epochs,
               args.batch_size,
               args.patches,
@@ -167,14 +172,15 @@ def run_DSS() -> None:
     for filename in os.listdir(args.input_path):
         # Get filename of binarized image
         f, ext = os.path.splitext(filename)
-        if ext != '.pbm' and "binarized" not in f: continue
+        # if ext != '.pbm' and "binarized" not in f: continue
         file = os.path.join(args.input_path, filename)
 
-        # Create directory for segmented characters
-        segmented_dir = os.path.join("img", "test_segmented", f)
-        if os.path.isdir(segmented_dir):
-            shutil.rmtree(segmented_dir)
-        os.makedirs(segmented_dir)
+        if args.save_segmentation:
+            # Create directory for segmented characters
+            segmented_dir = os.path.join(args.output_path, "test_segmented", f)
+            if os.path.isdir(segmented_dir):
+                shutil.rmtree(segmented_dir)
+            os.makedirs(segmented_dir)
 
         # Segment
         segmented_characters = extract_and_resize_characters(file)
@@ -182,9 +188,10 @@ def run_DSS() -> None:
         for line_id, line in enumerate(segmented_characters):
             transcript.append("")
             for char_id, img in enumerate(line):
+                if args.save_segmentation:
                 # Save segmented characters by index: "{line}-{char}.png"
-                name = f'{line_id}-{char_id}.png'
-                cv2.imwrite(os.path.join(segmented_dir, name), img)
+                    name = f'{line_id}-{char_id}.png'
+                    cv2.imwrite(os.path.join(segmented_dir, name), img)
 
                 # Classify character and add to transcript
                 img = torch.from_numpy(img.reshape((1, 1, CHARACTER_HEIGHT, CHARACTER_WIDTH))).float().to(device)
@@ -192,8 +199,8 @@ def run_DSS() -> None:
                 letter = hebrewize(encoder.inverse_transform(output.detach().cpu().numpy())[0][0].decode())
                 transcript[-1] += letter
 
-            # Reverse characters in line
-            transcript[-1] = transcript[-1][::-1]
+            # Reverse characters in line (in case segmentation outputs LTR, which it doesn't)
+            # transcript[-1] = transcript[-1][::-1]
 
         # Write transcript to file
         transcript = "\n".join(transcript)
@@ -208,6 +215,5 @@ def run_DSS() -> None:
 # Main script. This script will run the entire pipeline.
 ##############################################
 if __name__ == '__main__':
-    print("RUNNING TASK 1. THE DEAD SEA SCROLLS")
     run_DSS()
     

@@ -44,13 +44,13 @@ def find_lines_v2(char_boxes, img_height):
 
         lines.append(current_line)
 
-    # remove lines with less than 3 characters
-    lines = [line for line in lines if len(line) >= 3]
+    # remove lines with less than 2 characters
+    lines = [line for line in lines if len(line) >= 2]
 
     # sort lines based on the y-coordinate of the first box in the line
     lines = sorted(lines, key=lambda line: line[0][1] if line else float('inf'))
 
-    print("Number of lines found:", len(lines))
+    # print("Number of lines found:", len(lines))
 
     return lines
 
@@ -180,16 +180,16 @@ def segment_Image(image_path):
 
             char_images.append(char_img)
             # Draw rectangle for visual debugging
-            cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            # cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
     # Find lines
     lines = find_lines_v2(char_boxes, img_height)
 
     # Show the image with detected characters and horizontal lines marked
-    img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3))
-    cv2.imshow('Segmented Characters with Lines', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # img = cv2.resize(img, (img.shape[1]//3, img.shape[0]//3))
+    # cv2.imshow('Segmented Characters with Lines', img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
 
     return lines
 
