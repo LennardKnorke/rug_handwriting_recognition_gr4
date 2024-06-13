@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         '-e',
         '--epochs',
         type=int,
-        default=25,
+        default=160,
         help='Number of epochs to train the classifier for.'
     )
 
@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
         '-s',
         '--test-split',
         type=int,
-        default=10,
+        default=0,
         choices=range(100),
         help='Percentage of test pre-segmented characters. Set to 0 to disable.'
     )

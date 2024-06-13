@@ -406,12 +406,16 @@ class RandomAug(object):
         self.mag_range = np.random.randint(0, 3)
 
     def __call__(self, img):
-        for _ in range(self.N):
-            op = np.random.randint(0, len(self.aug_list))
+        for i in range(self.N):
+            if i == 0: op = 0
+            if i == 1: op = 8
+            else: op = np.random.randint(1, len(self.aug_list)-1)
+
             if op <= 4 and not isinstance(img, Image.Image): 
                 img = Image.fromarray(img)
             elif op > 4 and isinstance(img, Image.Image):
                 img = np.array(img)
+
             img = self.aug_list[op](img, mag = self.M, prob = 1)
             img = np.array(img)
 

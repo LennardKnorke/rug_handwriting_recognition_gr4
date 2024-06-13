@@ -222,6 +222,7 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
     if train_recog:
         recognizer = networks.ClassifierCNN(CHARACTER_HEIGHT).to(device)
         recognizer_opt = optim.AdamW(recognizer.parameters(), amsgrad=True)
+        scheduler = optim.lr_scheduler.MultiStepLR(recognizer_opt, milestones = [120, 140], gamma = 0.1)
         # summary(recognizer, input_size=(1, 1, CHARACTER_HEIGHT, CHARACTER_WIDTH), device=device)
         if split: classes, test_labels, testloader = load_test_data(batch_size, split)
     else:
@@ -250,6 +251,7 @@ def train(n_epochs, batch_size, n_patches=None, radius=None, N=None, M=None, ela
             ep_loss, ep_aug_loss, ep_acc = train_epoch(org_images, batch_size, labels, recognizer, recognizer_opt, agent_opt, classes, test_labels, testloader, agent, n_patches, radius, N, M, elastic=False, lta=False, train_recog=True, randaug_sampler=randaug_sampler, split=split)
 
 
+        scheduler.step()
         losses.append(ep_loss); aug_losses.append(ep_aug_loss); accs.append(ep_acc)
         print(f"\nEp {ep}. Train Loss: {ep_loss:.2f}. Test Accuracy: {ep_acc:.4f}.")
 
