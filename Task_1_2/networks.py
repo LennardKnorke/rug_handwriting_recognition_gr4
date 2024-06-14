@@ -3,10 +3,17 @@ import torch.nn.functional as F
 import numpy as np
 
 class AugmentAgentCNN(nn.Module):
+    """
+    Network for the agent of Learn to Augment
+    """
     def __init__(
         self,
         n_points: int
     ):
+        """
+        Initialize network.
+        @param n_points: Number of fiducial points.
+        """
         super(AugmentAgentCNN, self).__init__()
         self.n_points = n_points
         self.n_patches = (n_points//2)-1
@@ -40,10 +47,17 @@ class AugmentAgentCNN(nn.Module):
         return x
     
 class ClassifierCNN(nn.Module):
+    """
+    Network for segmented character classification
+    """
     def __init__(
         self,
         image_height
     ):
+        """
+        Initialize network.
+        @param image_height: Height of input images
+        """
         super(ClassifierCNN, self).__init__()
         self.image_height = image_height
         

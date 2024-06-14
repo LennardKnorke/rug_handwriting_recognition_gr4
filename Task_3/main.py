@@ -57,6 +57,7 @@ if __name__ == "__main__":
         output_rnn, output_ctc = model(img)
         pred_ints = output_rnn.argmax(2).cpu().numpy()
         decoded_str = ctc_decode(pred_ints)[0]
+        decoded_str = decoded_str.strip()
         print(decoded_str)
 
         # Save output

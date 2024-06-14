@@ -113,6 +113,9 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
+    args.epochs = max(2, args.epochs)
+    args.batch_size = max(2, args.batch_size)
+
     if args.lta and "elastic" not in args.augment:
         args.augment.append("elastic")
 
@@ -129,9 +132,7 @@ def parse_args() -> argparse.Namespace:
 
 def run_DSS() -> None:
     """
-    Loads the best saved model and runs it on new DSS data available in filepath. 
-    Expects path to be filled with images png type 
-    Will print results and save prediction in a file
+    Loads the best saved model and run it on new DSS data.
     """
     args = parse_args()
 
@@ -140,22 +141,24 @@ def run_DSS() -> None:
         create_test_split(args.test_split)
 
     # Train classifier
-    classifier_name = uniquify(get_model_save_name('recognizer', args.patches, args.radius, args.n_randaug, args.m_randaug), find=True)
+    aug_dict = {'type': args.augment,
+                'n_patches': args.patches,
+                'radius': args.radius,
+                'N': args.n_randaug,
+                'M': args.m_randaug,
+                'lta': args.lta}
+    
+    classifier_name = uniquify(get_model_save_name('recognizer', aug_dict), find=True)
+
     if args.force_train or not os.path.exists(f"{classifier_name}.pth"):
+
         train(args.epochs,
               args.batch_size,
-              args.patches,
-              args.radius,
-              args.n_randaug,
-              args.m_randaug,
-              elastic="elastic" in args.augment,
-              lta=args.lta,
+              aug_dict,
               train_recog=True,
-              randaug="randaug" in args.augment,
               split=args.test_split
               )
               
-
     # Test classifier on pre-segmented test set
     if args.test_split:
         load_and_test(args.batch_size, classifier_name, args.test_split)
@@ -163,7 +166,6 @@ def run_DSS() -> None:
     # Load classifier and encoder
     classifier = load_classifier(classifier_name)
     encoder = load("encoder.joblib")
-    classes = encoder.categories_[0]
 
     # Create output folder
     os.makedirs(args.output_path, exist_ok=True)
@@ -189,7 +191,7 @@ def run_DSS() -> None:
             transcript.append("")
             for char_id, img in enumerate(line):
                 if args.save_segmentation:
-                # Save segmented characters by index: "{line}-{char}.png"
+                    # Save segmented characters by index: "{line}-{char}.png"
                     name = f'{line_id}-{char_id}.png'
                     cv2.imwrite(os.path.join(segmented_dir, name), img)
 
@@ -207,13 +209,7 @@ def run_DSS() -> None:
         with open(os.path.join(args.output_path, f"{f}.txt"), "w", encoding='utf-8') as text_file:
             text_file.write(transcript)
 
-        
 
-        
-
-##############################################
-# Main script. This script will run the entire pipeline.
-##############################################
 if __name__ == '__main__':
     run_DSS()
     

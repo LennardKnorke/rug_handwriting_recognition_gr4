@@ -1,5 +1,5 @@
 """
-This script processes an image to segment it into lines of character bounding boxes, resizes each character image to a fixed size (38x48 by default), and pads the resized images to maintain their aspect ratio.
+This script processes an image to segment it into lines of character bounding boxes, resizes each character image to a fixed size, and pads the resized images to maintain their aspect ratio.
 
 Usage:
     You can import this script as a module and use the `extract_and_resize_characters` function
@@ -12,66 +12,15 @@ Example:
 """
 
 import cv2
-import numpy as np
 from utils import *
 
 def find_lines_v2(char_boxes, img_height):
-    # TTLA-c
-    # Sort character boxes by the x coordinate in descending order for RTL languages
-    char_boxes = sorted(char_boxes, key=lambda x: x[0], reverse=True)
-
-    lines = []
-    vertical_extension = img_height // 50
-    remaining_boxes = []
-
-    while char_boxes:
-        rightmost_box = char_boxes[0]
-        current_line = []
-
-        mid_of_box = rightmost_box[1] + rightmost_box[3] // 2
-        line_bottom = mid_of_box - vertical_extension
-        line_top = mid_of_box + vertical_extension
-
-        next_box = find_neighbour_box(char_boxes, mid_of_box, line_top, line_bottom)
-        while next_box:
-            current_line.append(next_box)
-            char_boxes.remove(next_box)
-            mid_of_box = next_box[1] + next_box[3] // 2
-            line_bottom = mid_of_box - vertical_extension
-            line_top = mid_of_box + vertical_extension
-            next_box = find_neighbour_box(char_boxes, mid_of_box, line_top, line_bottom)
-
-
-        lines.append(current_line)
-
-    # remove lines with less than 2 characters
-    lines = [line for line in lines if len(line) >= 2]
-
-    # sort lines based on the y-coordinate of the first box in the line
-    lines = sorted(lines, key=lambda line: line[0][1] if line else float('inf'))
-
-    # print("Number of lines found:", len(lines))
-
-    return lines
-
-
-def find_neighbour_box(boxes, mid, line_top, line_bottom):
-    for box in boxes:
-        found_box_mid = box[1] + box[3] // 2
-        if line_bottom <= found_box_mid <= line_top:
-            return box
-    return None
-
-
-
-def find_lines(char_boxes, img_height):
     """
-    TTLA
-    Organizes character bounding boxes into lines based on their vertical positions.
+    TTLA-c implementation.
 
     This function sorts character bounding boxes from right to left, then groups them into lines
     based on their vertical overlap. Each line is represented as a list of bounding boxes.
-    Lines with fewer than 3 characters are discarded. The remaining lines are sorted
+    Lines with fewer than 2 characters are discarded. The remaining lines are sorted
     from top to bottom based on their vertical position.
 
     Parameters:
@@ -81,51 +30,62 @@ def find_lines(char_boxes, img_height):
     img_height (int): The height of the image from which the characters were extracted.
 
     Returns:
-    list of list of tuples: A list of lines, where each line is a list of bounding boxes (tuples).
-                            The lines are sorted from top to bottom.
+    list of list of numpy.ndarray: A list (lines) of a list (characters) of character bounding boxes, sorted from top to bottom, right to left
     """
-    # Sort character boxes by the x coordinate in descending order for RTL languages
     char_boxes = sorted(char_boxes, key=lambda x: x[0], reverse=True)
 
     lines = []
-    vertical_extension = img_height // 39  # Set vertical extension as 1/40th of the image height
+    vertical_extension = img_height // 50
 
     while char_boxes:
-        # Start with the rightmost box (first in the list)
         rightmost_box = char_boxes[0]
         current_line = []
 
-        # Establish a horizontal line across the y-midpoint of the rightmost box
-        y_mid = rightmost_box[1] + rightmost_box[3] // 2
-        line_min = y_mid - vertical_extension  # Extend vertically by 1/40th of image height
-        line_max = y_mid + vertical_extension
+        mid_of_box = rightmost_box[1] + rightmost_box[3] // 2
+        line_bottom = mid_of_box - vertical_extension
+        line_top = mid_of_box + vertical_extension
 
-        # Check all remaining boxes to see if they intersect with this line
-        remaining_boxes = []
-        for box in char_boxes:
-            box_mid = box[1] + box[3] // 2
-            if line_min <= box_mid <= line_max:
-                current_line.append(box)
-            else:
-                remaining_boxes.append(box)
+        next_box = find_neighbour_box(char_boxes, line_top, line_bottom)
+        while next_box:
+            current_line.append(next_box)
+            char_boxes.remove(next_box)
+            mid_of_box = next_box[1] + next_box[3] // 2
+            line_bottom = mid_of_box - vertical_extension
+            line_top = mid_of_box + vertical_extension
+            next_box = find_neighbour_box(char_boxes, line_top, line_bottom)
 
-        # Add the current line to lines and use the remaining boxes for the next iteration
         lines.append(current_line)
-        char_boxes = remaining_boxes
 
-    # remove lines with less than 3 characters
-    lines = [line for line in lines if len(line) >= 3]
+    # remove lines with fewer than 2 characters
+    lines = [line for line in lines if len(line) >= 2]
 
+    # sort lines based on the y-coordinate of the first box in the line
     lines = sorted(lines, key=lambda line: line[0][1] if line else float('inf'))
 
-    print("Number of lines found:", len(lines))
-
     return lines
+
+
+def find_neighbour_box(boxes, line_top, line_bottom):
+    """
+    Parameters:
+    boxes (list of tuples): List of bounding boxes for characters.
+    line_top (int): The highest y-coordinate for a box to be considered in the same line
+    line_bottom (int): The lowest y-coordinate for a box to be considered in the same line
+
+    Returns:
+    tuple: The rightmost bounding box in the current line
+    """
+    for box in boxes:
+        found_box_mid = box[1] + box[3] // 2
+        if line_bottom <= found_box_mid <= line_top:
+            return box
+    return None
 
 def show_img(img, title='img'):
     cv2.imshow(title, img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
 def segment_Image(image_path):
     """
     Segments an image into lines of character bounding boxes.
@@ -155,7 +115,6 @@ def segment_Image(image_path):
     # Apply adaptive threshold to ensure the image is binary
     # img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
     # show_img(img, 'adaptiveThreshold')
-
 
     # Apply dilation followed by erosion to close small holes and gaps in the characters
     # kernel = np.ones((5,5), np.uint8)

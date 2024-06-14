@@ -1,9 +1,8 @@
 import os
-import cv2
 import torch
 from torch.utils.data import Dataset
 
-from utils import resize_and_pad, CHAR_SET, CHAR_TO_IDX, IDX_TO_CHAR, IMAGE_WIDTH, IMAGE_HEIGHT, MAX_SEQ_LENGTH
+from utils import CHAR_SET, CHAR_TO_IDX, MAX_SEQ_LENGTH
 
 def get_y_from_file(name : str, labelFile) -> str:
     """

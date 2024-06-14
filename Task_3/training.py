@@ -15,10 +15,10 @@ from network import *
 from utils import *
 
 # Makros only relevant for training
-BATCH_SIZE = 8
-N_EPOCHS = 240
+BATCH_SIZE = 32
+N_EPOCHS = 140
 N_FOLDS = 5
-TEST_RATIO = 0.2
+TEST_RATIO = 0.1
 
 def train_model(model : nn.Module, 
                 optimizer : optim,
@@ -33,10 +33,12 @@ def train_model(model : nn.Module,
     """
     Train a model on a dataset and run validation with given optimization/scheduler
     @param model: torch model to train
-    @param training_loader: loader for the training data
-    @param testing_loader: loader for the validation data
     @param optimizer: optimizer to use for training
     @param scheduler: scheduler to use for training
+    @param training_loader: loader for the training data
+    @param testing_loader: loader for the validation data
+    @param print_epochs: Whether epoch performance should be printed
+    @param augmentation: Types of augmentation to use (None, "RL", "simple", or "both")
     @return: 6 lists, 3 for training 3 for testing, each containing the loss, word error rate, and character error rate
     """
     assert augmentation["type"] in [None, "simple", "RL", "both"], "Invalid augmentation type"
@@ -54,19 +56,19 @@ def train_model(model : nn.Module,
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
         augmentation["model"].to(DEVICE)
     
+    # Epoch loop
     for ep in tqdm(range(N_EPOCHS), desc='Epochs'):
-        loss_train_ep = 0.0
-        wer_train_ep = 0.0
-        cer_train_ep = 0.0
-        if augmentation["type"] == "RL" or augmentation["type"] == "both":
-            aug_loss_ep = 0.0
+        loss_train_ep, wer_train_ep, cer_train_ep, aug_loss_ep = 0.0, 0.0, 0.0, 0.0
+
         loss_fn = nn.CTCLoss(zero_infinity = True)
 
-        # Training Loop
         model.train()
+
+        # Train augmentation agent
         if augmentation["type"] == "RL" or augmentation["type"] == "both":
             augmentation["model"].train()
 
+        # Batch loop
         batch_progress = tqdm(train_loader, desc='Batches', leave=False)
         for i, (images, targets) in enumerate(batch_progress):
             optimizer.zero_grad()
@@ -77,9 +79,6 @@ def train_model(model : nn.Module,
             images = load_image_batch(images)
             
             # Augmentation step
-            if augmentation["type"] == "simple" or augmentation["type"] == "both":
-                pass
-                # images = simple_augmentation(images)
             if augmentation["type"] == "RL" or augmentation["type"] == "both":
                 images, aug_S2, agent_outputs, S, S2 = augment.augment_data(images, augmentation["n_patches"], augmentation["radius"], agent=augmentation["model"])
                 aug_S2 = preprocess_batch(aug_S2)
@@ -126,6 +125,7 @@ def train_model(model : nn.Module,
 
                 # print(decoded_strings[i], "-----", decoded_strings_S2[i])
 
+                # Get error for individual images, for comparison between S and S2
                 error = torch.FloatTensor(np.array([fastwer.score_sent(decoded_strings[i], targets_strings[i], char_level=True) for i in range(len(targets_strings))]))
                 error_S2 = torch.FloatTensor(np.array([fastwer.score_sent(decoded_strings_S2[i], targets_strings[i], char_level=True) for i in range(len(targets_strings))]))
 
@@ -155,8 +155,7 @@ def train_model(model : nn.Module,
         if augmentation["type"] == "RL" or augmentation["type"] == "both":
             train_aug_loss.append(aug_loss_ep / len(training_loader))
 
-        
-        # Testing Loop
+        # Testing on test split
         loss_test_ep = 0.0
         wer_test_ep = 0.0
         cer_test_ep = 0.0
@@ -193,7 +192,7 @@ def train_model(model : nn.Module,
                 wer, cer = get_error_rates(decoded_strings, targets_strings)
                 wer_test_ep += wer
                 cer_test_ep += cer
-        # End of Epoch
+                
         scheduler.step()
         test_loss.append(loss_test_ep / len(testing_loader))
         test_wer.append(wer_test_ep / len(testing_loader))
@@ -211,29 +210,32 @@ if __name__ == "__main__":
     print("Training a Network for IAM Handwriting Database")
 
 
-    # Prepapre data (training and testing data)
-    Data = IAM_Dataset(images_folder = "./Task_3/img/", 
-                       labels_file = "./Task_3/iam_lines_gt.txt"
+    # Prepare data (training and testing data)
+    Data = IAM_Dataset(images_folder = "./img/", 
+                       labels_file = "./iam_lines_gt.txt"
                        )
     train_data, test_data = train_test_split(Data, test_size = TEST_RATIO, random_state = SEED)
     print("Training data: ", len(train_data))
     print("Testing data: ", len(test_data))
 
+    best_params = [0.0, 2, 10]
+
+    """
+    SEARCH FOR BEST PARAMETERS (not updated, best parameters found above)
+
+    best_loss = 1000000
+
     # Set up KFold
     kFolds = KFold(n_splits = N_FOLDS, shuffle = True, random_state = SEED)
     # Parameters to search for
     parameters = {
-        "conv_dropout": [0.0, 0.1, 0.25],        # Might not be needed in case we figure our THEIR code
+        "conv_dropout": [0.0, 0.1, 0.25],
         "augment_dicts": [
-            {"type": "simple"},
-            {"tye" : None}
+            {"type": "simple"}
         ]
     }
     paramList = list(itertools.product(*parameters.values()))
 
-    best_loss = 1000000
-    best_params = [0.0, 2, 10]
-    """
     # Train different models for multiple folds
     for params in paramList:
         print("Training with parameters: ", params)
@@ -272,30 +274,31 @@ if __name__ == "__main__":
             best_params = params
             print("New best model found with parameters: ", params)
     """
+    
     ##########################################################################################################
     # Train the best model with all the training data and test on testing data
     # Save the performance and model at the end
     ##########################################################################################################
     print("Best model found with parameters: ", best_params)
+    # Init recognizer
     conv_dropout, n_patches, radius = best_params
     model = Recurrent_CNN(N_CHARS + 1,
                           Conv_dropout = conv_dropout
                           )
-    
-    # model.load_state_dict(torch.load("./Task_3/IAM_the_best_model.pth"))
-    
     optimizer = optim.Adam(model.parameters(), lr = 0.001)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones = [120, 180], gamma = 0.1)
 
+    # Init augmentation agent
     n_points = 2*(n_patches + 1)
     aug_model = AugmentAgentCNN(n_points)
     aug_optimizer = optim.Adadelta(aug_model.parameters())
+    augmentation = {'model': aug_model, 'type': 'RL', 'opt': aug_optimizer, 'n_patches': n_patches, 'radius': radius}
 
+    # Init data
     train_loader = DataLoader(train_data, batch_size = BATCH_SIZE, shuffle = True)
     test_loader = DataLoader(test_data, batch_size = BATCH_SIZE, shuffle = False)
 
-    augmentation = {'model': aug_model, 'type': 'RL', 'opt': aug_optimizer, 'n_patches': n_patches, 'radius': radius}
-
+    # Train
     train_loss, test_loss, train_wer, test_wer, train_cer, test_cer, aug_loss = train_model(model = model,
                                                                                   training_loader = train_loader,
                                                                                   testing_loader = test_loader,
@@ -303,13 +306,15 @@ if __name__ == "__main__":
                                                                                   scheduler = scheduler,
                                                                                   print_epochs = True,
                                                                                   augmentation = augmentation)
+    
+    # Finalize
     print(f"Final Results: \nTest Loss:{test_loss[-1]} \nTest Word Error Rate: {test_wer[-1]}\nTest Character Error Rate: {test_cer[-1]}")
     # Save the model
-    torch.save(model.state_dict(), "./Task_3/IAM_the_best_model.pth")
-    torch.save(optimizer.state_dict(), "./Task_3/IAM_the_best_model_optim.pth")
+    torch.save(model.state_dict(), "./IAM_the_best_model.pth")
+    torch.save(optimizer.state_dict(), "./IAM_the_best_model_optim.pth")
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
-        torch.save(aug_model.state_dict(), "./Task_3/IAM_the_best_aug.pth")
-        torch.save(aug_optimizer.state_dict(), "./Task_3/IAM_the_best_aug_optim.pth")
+        torch.save(aug_model.state_dict(), "./IAM_the_best_aug.pth")
+        torch.save(aug_optimizer.state_dict(), "./IAM_the_best_aug_optim.pth")
     
     # Plot performance
     plt.figure()
@@ -319,7 +324,7 @@ if __name__ == "__main__":
     plt.ylabel("Loss")
     plt.legend()
     plt.title("Loss")
-    plt.savefig("./Task_3/loss_plot.png")
+    plt.savefig("./loss_plot.png")
     plt.close()
 
     plt.figure()
@@ -328,7 +333,7 @@ if __name__ == "__main__":
     plt.xlabel("Epoch")
     plt.legend()
     plt.title("Character Error Rate")
-    plt.savefig("./Task_3/cer_plot.png")
+    plt.savefig("./cer_plot.png")
     plt.close()
 
     plt.figure()
@@ -337,7 +342,7 @@ if __name__ == "__main__":
     plt.xlabel("Epoch")
     plt.legend()
     plt.title("Word Error Rate")
-    plt.savefig("./Task_3/wer_plot.png")
+    plt.savefig("./wer_plot.png")
     plt.close()
 
     if augmentation["type"] == "RL" or augmentation["type"] == "both":
@@ -346,6 +351,5 @@ if __name__ == "__main__":
         plt.xlabel("Epoch")
         plt.legend()
         plt.title("Augmentation agent loss")
-        plt.savefig("./Task_3/aug_loss_plot.png")
+        plt.savefig("./aug_loss_plot.png")
         plt.close()
-    # Done

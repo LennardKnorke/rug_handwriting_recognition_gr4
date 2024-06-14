@@ -121,10 +121,17 @@ class Recurrent_CNN(nn.Module):
 
 
 class AugmentAgentCNN(nn.Module):
+    """
+    Network for the agent of Learn to Augment
+    """
     def __init__(
         self,
         n_points: int
     ):
+        """
+        Initialize network.
+        @param n_points: Number of fiducial points.
+        """
         super(AugmentAgentCNN, self).__init__()
         self.n_points = n_points
         self.n_patches = (n_points//2)-1
@@ -154,5 +161,4 @@ class AugmentAgentCNN(nn.Module):
         x = x.view(-1, 192)
         x = self.fc1(x)
         x = x.view(-1, self.n_points, 2, 2)
-        # x = nn.functional.softmax(x,3)
         return x

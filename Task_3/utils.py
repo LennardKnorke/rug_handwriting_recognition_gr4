@@ -5,7 +5,7 @@ import numpy as np
 import fastwer
 import imageio.v3 as iio
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
+
 # MAKROS
 SEED : int = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,11 +19,16 @@ CHAR_SET = (' ',
             '0','1','2','3','4','5','6','7','8','9',
             '\\','\'','!','"','#','$','%','&','(',')','*','+',',','-','.','/',':',';','=','>','?','_')
 N_CHARS = len(CHAR_SET)
-CHAR_TO_IDX : dict = {char: idx + 1 for idx, char in enumerate(CHAR_SET)} #convert chars to ints 0 is reserved for padding
-IDX_TO_CHAR : dict = {idx + 1: char for idx, char in enumerate(CHAR_SET)} #convert ints to chars 0 is reserved for padding
+CHAR_TO_IDX : dict = {char: idx + 1 for idx, char in enumerate(CHAR_SET)} #convert chars to ints, 0 is reserved for padding
+IDX_TO_CHAR : dict = {idx + 1: char for idx, char in enumerate(CHAR_SET)} #convert ints to chars, 0 is reserved for padding
 
 
 def preprocess_batch(images : list)->torch.Tensor:
+    """
+    Preprocess the batch of images for the network
+    @param images: Images to process
+    @return: batch of processed images
+    """
     new_images = []
     for img in images:
         img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
@@ -34,16 +39,13 @@ def preprocess_batch(images : list)->torch.Tensor:
 
 def load_image_batch(image_paths):
     """
-    Preprocess the batch of images for the network
+    Load the batch of images
     @param image_paths: paths for images
-    @return: batch of unprocessed images before augmentation
+    @return: batch of unprocessed images (for before augmentation)
     """
     batch = []
     for path in image_paths:
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        #img = resize_and_pad(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
-        #img = img / 255.0
-        # img = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
         batch.append(img)
     
     return batch
@@ -74,7 +76,7 @@ def resize_and_pad(image, size=(IMAGE_WIDTH, IMAGE_HEIGHT)):
     top, bottom = delta_h // 2, delta_h - (delta_h // 2)  # Distribute padding height evenly
     left, right = delta_w // 2, delta_w - (delta_w // 2)  # Distribute padding width evenly
 
-    color = [255, 255, 255]  # Padding color (white
+    color = [255, 255, 255]  # Padding color (white)
     new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # Add padding
 
     return new_image
@@ -84,6 +86,7 @@ def ctc_decode(pred_ints : torch.Tensor, blank : int = 0) -> list:
     """
     Decode the batch output of the CTC module
     @param pred: output of the CRNN model (BatchSize, 128)
+    @param blank: integer for spaces
     @return: decoded strings (BatchSize, Strings of variable length)
     """
     decoded_strs = []
@@ -127,8 +130,8 @@ def levenstein_distance(str1 : str, str2 : str):
     Calculate levenshtein distance:
     Taken from https://www.geeksforgeeks.org/introduction-to-levenshtein-distance/!
 
-    @param pred: predicted string
-    @param target: target string
+    @param str1: predicted string
+    @param str2: target string
     @return: levenshtein distance as int
     """
     # Get the lengths of the input strings

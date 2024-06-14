@@ -11,7 +11,11 @@ import torch
 from torchvision.transforms import *
 from tacobox import Taco
 
+
 class SaltNoise:
+    """
+    Salt noise operation. Adapted from https://github.com/roatienza/straug/blob/main/straug/noise.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 
@@ -19,7 +23,6 @@ class SaltNoise:
         if self.rng.uniform(0, 1) > prob:
             return img
 
-        # c = self.rng.uniform(.03, .27)
         b = [.03, .07, .11]
         if mag < 0 or mag >= len(b):
             index = 0
@@ -27,13 +30,14 @@ class SaltNoise:
             index = mag
         a = b[index]
         c = self.rng.uniform(a, a + .04)
-        s = self.rng.integers(2 ** 32, size=4)
         img = sk.util.random_noise(np.asarray(img) / 255., mode='salt', amount=c) * 255
         return Image.fromarray(img.astype(np.uint8))
 
 
-
 class Snow:
+    """
+    Snow operation. Taken from https://github.com/roatienza/straug/blob/main/straug/weather.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 
@@ -59,9 +63,8 @@ class Snow:
             img = np.expand_dims(img, axis=2)
             img = np.repeat(img, 3, axis=2)
 
-        snow_layer = self.rng.normal(size=img.shape[:2], loc=c[0], scale=c[1])  # [:2] for monochrome
+        snow_layer = self.rng.normal(size=img.shape[:2], loc=c[0], scale=c[1])
 
-        # snow_layer = clipped_zoom(snow_layer[..., np.newaxis], c[2])
         snow_layer[snow_layer < c[3]] = 0
 
         snow_layer = Image.fromarray((np.clip(snow_layer.squeeze(), 0, 1) * 255).astype(np.uint8), mode='L')
@@ -73,8 +76,6 @@ class Snow:
 
         snow_layer = cv2.imdecode(np.frombuffer(snow_layer.make_blob(), np.uint8),
                                   cv2.IMREAD_UNCHANGED) / 255.
-
-        # snow_layer = cv2.cvtColor(snow_layer, cv2.COLOR_BGR2RGB)
 
         snow_layer = snow_layer[..., np.newaxis]
 
@@ -90,6 +91,9 @@ class Snow:
 
 
 class Rain:
+    """
+    Rain operation. Taken from https://github.com/roatienza/straug/blob/main/straug/weather.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 
@@ -129,6 +133,9 @@ class Rain:
         return img
     
 class Shrink:
+    """
+    Shrink operation. Taken from https://github.com/roatienza/straug/blob/main/straug/geometry.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
         self.tps = cv2.createThinPlateSplineShapeTransformer()
@@ -145,14 +152,11 @@ class Shrink:
         dstpt = []
 
         w_33 = 0.33 * w
-        w_50 = 0.50 * w
         w_66 = 0.66 * w
 
         h_50 = 0.50 * h
 
         p = 0
-
-        # frac = 0.4
 
         b = [.2, .3, .4]
         if mag < 0 or mag >= len(b):
@@ -204,6 +208,9 @@ class Shrink:
 
 
 class Rotate:
+    """
+    Rotate operation. Taken from https://github.com/roatienza/straug/blob/main/straug/geometry.py
+    """
     def __init__(self, square_side=224, rng=None):
         self.side = square_side
         self.rng = np.random.default_rng() if rng is None else rng
@@ -227,6 +234,9 @@ class Rotate:
         return img
     
 class TranslateXAbs:
+    """
+    TranslateXABS operation used for Shrink. Taken from https://github.com/roatienza/straug/blob/main/straug/geometry.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 
@@ -242,6 +252,9 @@ class TranslateXAbs:
 
 
 class TranslateYAbs:
+    """
+    TranslateYABS operation used for Shrink. Taken from https://github.com/roatienza/straug/blob/main/straug/geometry.py
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 
@@ -258,7 +271,7 @@ class TranslateYAbs:
 
 class RandomErasing(object):
     '''
-    Class that performs Random Erasing in Random Erasing Data Augmentation by Zhong et al. 
+    Class that performs Random Erasing in Random Erasing Data Augmentation. Taken from https://github.com/zhunzhong07/Random-Erasing/blob/master/utils/transforms.py 
     -------------------------------------------------------------------------------------
     probability: The probability that the operation will be performed.
     sl: min erasing area
@@ -303,6 +316,9 @@ class RandomErasing(object):
 
 
 class Erosion:
+    """
+    Erotion operation.
+    """
     def __init__(self, kernel_size=(3, 3), rng=None):
         self.kernel_size = kernel_size
         self.rng = np.random.default_rng() if rng is None else rng
@@ -326,6 +342,9 @@ class Erosion:
 
 
 class Dilation:
+    """
+    Dilation operation.
+    """
     def __init__(self, kernel_size=(3, 3), rng=None):
         self.kernel_size = kernel_size
         self.rng = np.random.default_rng() if rng is None else rng
@@ -348,6 +367,9 @@ class Dilation:
     
 
 class TilingAndCorruption:
+    """
+    TilingAndCorruption (TACO) operation.
+    """
     def __init__(self, rng=None):
         self.rng = np.random.default_rng() if rng is None else rng
 

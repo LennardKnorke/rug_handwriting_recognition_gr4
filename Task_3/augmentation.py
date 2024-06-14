@@ -177,14 +177,30 @@ def distort(src, n_patches, radius, movement, vertical=True, return_points=False
     movements will always use the radius threshold. If a list of radii is given, these will be used. If return_points
     is true, the source and destination points will be returned besides the distored image, and otherwise the sampled
     radii. Adapted from https://github.com/RubanSeven/Text-Image-Augmentation-python/blob/master/warp_mls.py
+
+    @param src: Image to distort
+    @param n_patches: Number of patches
+    @param radius: Maximum radius for moving fiducial points.
+    @param movement: Moving state for the directions of movement for each fiducial point.
+    @param vertical: Whether the patches should be arranged vertically
+    @param return_points: Return coordinates of source and destination points
+    @param max_radius: If True, always move fiducial points with the maximum radius
+    @param radii: Custom array of radii to use for distortion
+
+    @return Distorted image
+    @return If return_points is False, also return an array of radii that were used for distortion
+    @return If return_points is True, also return coordinates of source fiducial points
+    @return If return_points is True, also return coordinates of destination fiducial points
     """
     movement[movement==0] = -1
+
     if radii is None:
         radii = []
         for _ in range(2*(n_patches+1)*2):
             radii.append(sample_radius(radius, max_radius))
     radii_copy = radii.copy()
     # if movement[0][0] == -1 and movement[0][1] == -1: radii[:] = [100 for _ in radii]
+
     img_h, img_w = src.shape[:2]
 
     if vertical: cut = img_h // n_patches
@@ -197,53 +213,57 @@ def distort(src, n_patches, radius, movement, vertical=True, return_points=False
     src_pts.append([img_w, 0])
     src_pts.append([img_w, img_h])
     src_pts.append([0, img_h])
-    if n_patches == 4:
-        src_pts.append([img_w//2, img_h//2])
 
     dst_pts.append([radii.pop()*movement[0][0], radii.pop()*movement[0][1]])
     dst_pts.append([img_w + radii.pop()*movement[1][0], radii.pop()*movement[1][1]])
     dst_pts.append([img_w + radii.pop()*movement[2][0], img_h + radii.pop()*movement[2][1]])
     dst_pts.append([radii.pop()*movement[3][0], img_h + radii.pop()*movement[3][1]])
-    if n_patches == 4:
-        dst_pts.append([img_w//2 + radii.pop()*movement[4][0], img_h//2 + radii.pop()*movement[3][1]])
-    else:
-        # half_radius = radius * 0.5
-        half_radius = 0
-        p_idx = 3
-        for cut_idx in np.arange(1, n_patches, 1):
-            if vertical:
-                src_pts.append([0, cut * cut_idx])
-                src_pts.append([img_w, cut * cut_idx])
-            else:
-                src_pts.append([cut * cut_idx, 0])
-                src_pts.append([cut * cut_idx, img_h])
+    
+    p_idx = 3
+    for cut_idx in np.arange(1, n_patches, 1):
+        if vertical:
+            src_pts.append([0, cut * cut_idx])
+            src_pts.append([img_w, cut * cut_idx])
+        else:
+            src_pts.append([cut * cut_idx, 0])
+            src_pts.append([cut * cut_idx, img_h])
 
-            p_idx += 1
-            if vertical: dst_pts.append([(radii.pop() - half_radius)*movement[p_idx][0],
-                            cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][1]])
-            else: dst_pts.append([cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][0],
-                            (radii.pop() - half_radius)*movement[p_idx][1]])
-            p_idx += 1
-            if vertical: dst_pts.append([img_w + (radii.pop() - half_radius)*movement[p_idx][0],
-                            cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][1]])
-            else: dst_pts.append([cut * cut_idx + (radii.pop() - half_radius)*movement[p_idx][0],
-                            img_h + (radii.pop() - half_radius)*movement[p_idx][1]])
+        p_idx += 1
+        if vertical: dst_pts.append([(radii.pop())*movement[p_idx][0],
+                        cut * cut_idx + (radii.pop())*movement[p_idx][1]])
+        else: dst_pts.append([cut * cut_idx + (radii.pop())*movement[p_idx][0],
+                        (radii.pop())*movement[p_idx][1]])
+        p_idx += 1
+        if vertical: dst_pts.append([img_w + (radii.pop())*movement[p_idx][0],
+                        cut * cut_idx + (radii.pop())*movement[p_idx][1]])
+        else: dst_pts.append([cut * cut_idx + (radii.pop())*movement[p_idx][0],
+                        img_h + (radii.pop())*movement[p_idx][1]])
 
     trans = WarpMLS(src, src_pts, dst_pts, img_w, img_h)
     dst = trans.generate()
-    # trans = ImageTransformer(src, np.array(src_pts), np.array(dst_pts), color_dim=2, interp_order=2)
-    # dst = trans.deform_viewport()
+
     if return_points: return dst, src_pts, dst_pts
     return dst, radii_copy
 
 def distort_batch(images, words, bboxes, n_patches, radius, S, radii_list=None):
     """
-    Disort a batch of images with elastic morphing based on the moving state array S.
+    Disort a batch of images with elastic morphing based on the moving state array S. Only augment one word in each line.
+    @param images: Images to distort
+    @param words: Images segmented into individual words
+    @param bboxes: Original bounding box coordinates of words
+    @param n_patches: Number of patches
+    @param radius: Radius threshold
+    @param S: Moving state for the directions of movement for each fiducial point.
+    @param radii_list: Custom array of radii to use for distortion
+
+    @return Distorted images
+    @return If radii_list is not given, also return an array of radii that were used for distortion
     """
     words = torch.squeeze(words, 1)
     aug_images = copy.deepcopy(images)
     words = words.detach().cpu().numpy()
     S_cpu = S.detach().cpu().numpy()
+
     new_radii_list = []
     for i in range(len(words)):
         if radii_list is None:
@@ -252,13 +272,13 @@ def distort_batch(images, words, bboxes, n_patches, radius, S, radii_list=None):
         else:
             word, _ = distort(words[i], n_patches, radius, S_cpu[i], radii=radii_list[i])
 
+        # Place augmented word back into the line
         x, y, w, h = bboxes[i]
         word = cv2.resize(word, (w, h))
         distort_line = images[i].copy()
         distort_line[y:y+h, x:x+w] = word
         aug_images[i] = distort_line
 
-    # aug_words = aug_words.reshape((len(words), 1, IMAGE_HEIGHT, IMAGE_WIDTH))
     if new_radii_list: return aug_images, new_radii_list
     return aug_images
 
@@ -266,7 +286,7 @@ def distort_batch(images, words, bboxes, n_patches, radius, S, radii_list=None):
 
 def augment_data(images, n_patches, radius, agent=None):
     """
-    Augment images with elastic morphing.
+    Augment images with elastic morphing. Only augment one word in each line.
     @param images: Images to augment
     @param n_patches: Number of patches
     @param radius: Radius threshold
@@ -276,29 +296,33 @@ def augment_data(images, n_patches, radius, agent=None):
             If agent is not provided, returns only randomly augmented images
     """
 
+    # Segment lines into words
     segmented = [line_to_words(image) for image in images]
     word_ids = [np.random.randint(len(x[0])) for x in segmented]
-    # word_ids = [1 for x in segmented]
     words, bboxes = [x[0][word_ids[i]] for i,x in enumerate(segmented)], [x[1][word_ids[i]] for i,x in enumerate(segmented)]
     words = np.array([cv2.resize(word, (100, 32)) for word in words])
     words = torch.FloatTensor(words).reshape((len(images), 1, 32, 100))
     words = words.to(DEVICE)
 
+    # Distort images based on moving states from agent
     if agent is not None:
         agent_outputs = agent(words)
         S = torch.max(agent_outputs, 3).indices
 
         S2 = S.detach().clone().cpu()
+
+        # Reverse direction of one fiducial point in each image
         rev_points = np.random.randint(S.shape[1], size=S.shape[0])
-        # rev_points = np.random.randint(1, size=S.shape[0])
         mask = torch.zeros_like(S2, dtype=torch.bool)
         mask[torch.arange(rev_points.shape[0]), rev_points, :] = True
         S2 = torch.where(mask, 1 - S2, S2)
 
+        # Augment
         aug_S, radii = distort_batch(images, words, bboxes, n_patches, radius, S.clone())
         aug_S2 = distort_batch(images, words, bboxes, n_patches, radius, S2.clone(), radii_list=radii)
         return aug_S, aug_S2, agent_outputs, S, S2
     
+    # Random distortion
     else:
         S = np.random.randint(2,size=images.shape[0]*2*(n_patches+1)*2).reshape((images.shape[0], 2*(n_patches+1), 2))
         S = torch.from_numpy(S)
@@ -307,26 +331,32 @@ def augment_data(images, n_patches, radius, agent=None):
         return aug_S
 
 def learning_agent_loss(error, error_S2, agent_outputs, S, S2):
+    """
+    Loss function for the augmentation agent of Learn to Augment.
+    @param error: character error rate of the recognizer on images augmented with moving state S
+    @param error_S2: character error rate of the recognizer on images augmented with moving state S2
+    @param agent_outputs: Learning agent outputs from this batch
+    @param S: Distortion moving state
+    @param S2: Random distortion moving state
+
+    @return Learning agent loss.
+    """
     S = S.to(DEVICE)
     S2 = S2.to(DEVICE)
+
+    # Fiducial points where the random moving state reversed the direction
     rev_mask = S != S2
+
+    # Transform agent outputs to probabilities
     agent_outputs = F.softmax(agent_outputs,3)
 
-    # rev = rev_mask.any(-1).max(-1).indices
-    # S_rev = S[torch.arange(rev.size(0)), rev]
-    # S2_rev = S2[torch.arange(rev.size(0)), rev]
-    # agent_outputs_small = agent_outputs[torch.arange(rev.size(0)), rev]
-    # mask = error < error_S2
-    # mask = mask.unsqueeze(-1).expand_as(S2_rev).to(DEVICE)
-    # true = torch.where(mask, S2_rev, S_rev)
-    # true = true.view(-1)
-    # agent_outputs_small = agent_outputs_small.view(-1, 2)
-    # loss = F.nll_loss(torch.log(agent_outputs_small + 1e-20), true)
-
+    # Compute P(S2|Iin) = S2_probs, and P(-S2|Iin) = S2_rev_probs
     S2_probs = torch.where(rev_mask, agent_outputs.min(-1).values, agent_outputs.max(-1).values)
     S2_rev_probs = 1 - S2_probs
     S2_probs = S2_probs.prod(-1)
     S2_rev_probs = S2_rev_probs.prod(-1)
+
+    # If S2 increases difficulty learn from S2, and otherwise from reversed S2
     mask = error < error_S2
     mask = mask.unsqueeze(-1).expand_as(S2_probs).to(DEVICE)
     P = torch.where(mask, S2_probs, S2_rev_probs)
@@ -346,13 +376,13 @@ def learning_agent_loss(error, error_S2, agent_outputs, S, S2):
 def train(error, error_S2, agent_opt, agent_outputs, S, S2):
     """
     Train the learning augmentation agent.
-    @param outputs: Outputs of the recognizer on the augmented images
-    @param outputs_S2: Outputs of the recognizer on the randomly augmented images
-    @param labels: True image classes
+    @param error: character error rate of the recognizer on images augmented with moving state S
+    @param error_S2: character error rate of the recognizer on images augmented with moving state S2
     @param agent_opt: Agent optimizer
-    @param agent_outputs: Agent outputs from this epoch
+    @param agent_outputs: Learning agent outputs from this batch
     @param S: Distortion moving state
     @param S2: Random distortion moving state
+
     @return Learning agent loss.
     """
     criterion = learning_agent_loss
@@ -365,21 +395,27 @@ def train(error, error_S2, agent_opt, agent_outputs, S, S2):
     return 0.0
 
 def line_to_words(image):
+    """
+    Segment a text image into images with individual words.
+    @param image: Image to segment
+
+    @return Word images and bounding box locations in the original image
+    """
     _, binary = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # Dilation to connect letters within a word
+    # Dilation
     kernel = np.ones((20, 20), np.uint8)
     binary = cv2.dilate(binary, kernel, iterations=1)
 
-    # Apply morphology to connect components
+    # Morphology
     kernel = np.ones((5, 5), np.uint8)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
     # Find contours
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Filter out small bounding boxes
-    min_width, min_height = 10, 10 # To be considered a word
+    # Remove bounding boxes that are too small
+    min_width, min_height = 10, 10
     contours = [cnt for cnt in contours if cv2.boundingRect(cnt)[2] > min_width and cv2.boundingRect(cnt)[3] > min_height]
 
     # Show contours
@@ -395,7 +431,6 @@ def line_to_words(image):
     # for cnt in contours:
     #     x, y, w, h = cv2.boundingRect(cnt)
     #     cv2.rectangle(image_with_rectangles, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
     # plt.figure(figsize=(5, 5))
     # plt.imshow(cv2.cvtColor(image_with_rectangles, cv2.COLOR_BGR2RGB))
     # plt.title('Bounding Rectangles')
@@ -403,9 +438,9 @@ def line_to_words(image):
 
     # Sort from left to right
     bounding_boxes = [cv2.boundingRect(cnt) for cnt in contours]
-    bounding_boxes = sorted(bounding_boxes, key=lambda b: b[0])  # Sort by x-coordinate
+    bounding_boxes = sorted(bounding_boxes, key=lambda b: b[0])
 
-    # Extract words
+    # Get word images
     word_images = []
     for bbox in bounding_boxes:
         x, y, w, h = bbox
@@ -423,6 +458,10 @@ def line_to_words(image):
     return word_images, bounding_boxes
 
 def augment_line_demo(line):
+    """
+    Demonstrate individual word augmentation by creating a gif of 100 different line augmentation (each time with only one word augmented).
+    @param line: Image to augment
+    """
     word_images, bounding_boxes = line_to_words(line)
 
     n_patches, radius = 3, 10
@@ -444,8 +483,5 @@ def augment_line_demo(line):
 
 
 if __name__ == '__main__':
-    # line = cv2.imread('img//a01-000u-04.png')
-    # line = cv2.cvtColor(line, cv2.COLOR_BGR2GRAY)
-
     line = cv2.imread('img//a01-000u-00.png', cv2.IMREAD_GRAYSCALE)
     augment_line_demo(line)
